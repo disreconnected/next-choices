@@ -1,0 +1,50 @@
+<div id="next_choices_settings_drawer" class="next-choices-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>Next Choices</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <label class="checkbox_label" for="next_choices_enabled">
+                <input id="next_choices_enabled" type="checkbox" />
+                <span data-i18n="Enable extension">Enable extension</span>
+            </label>
+            <label class="checkbox_label" for="next_choices_auto_generate">
+                <input id="next_choices_auto_generate" type="checkbox" />
+                <span data-i18n="Auto-generate (create choices after each AI reply. You can always trigger manually from the wand menu)">Auto-generate (create choices after each AI reply. You can always trigger manually from the wand menu)</span>
+            </label>
+            <label class="checkbox_label" for="next_choices_auto_send">
+                <input id="next_choices_auto_send" type="checkbox" />
+                <span data-i18n="Send on click (by default the choice is inserted into the input box for editing)">Send on click (by default the choice is inserted into the input box for editing)</span>
+            </label>
+
+            <label for="next_choices_profile" data-i18n="Generation source">Generation source</label>
+            <select id="next_choices_profile" class="text_pole"></select>
+            <small id="next_choices_no_cm_hint" style="display: none;" data-i18n="This SillyTavern version does not support Connection Profile requests. Only 'Current connection settings' can be used.">
+                This SillyTavern version does not support Connection Profile requests. Only 'Current connection settings' can be used.
+            </small>
+
+            <div class="next-choices-settings-row">
+                <div class="next-choices-settings-field">
+                    <label for="next_choices_num" data-i18n="Number of choices">Number of choices</label>
+                    <input id="next_choices_num" class="text_pole" type="number" min="1" max="10" step="1" />
+                </div>
+                <div class="next-choices-settings-field">
+                    <label for="next_choices_max_tokens" data-i18n="Max tokens">Max tokens</label>
+                    <input id="next_choices_max_tokens" class="text_pole" type="number" min="50" max="4096" step="10" />
+                </div>
+                <div class="next-choices-settings-field">
+                    <label for="next_choices_history_depth" data-i18n="History depth">History depth</label>
+                    <input id="next_choices_history_depth" class="text_pole" type="number" min="1" max="50" step="1" />
+                </div>
+            </div>
+
+            <label for="next_choices_prompt" data-i18n="Prompt template">Prompt template</label>
+            <small>
+                <span data-i18n="Available macros: ">Available macros: </span><code>{{history}}</code><span data-i18n=" (recent conversation), "> (recent conversation), </span><code>{{user}}</code><span data-i18n=", ">, </span><code>{{char}}</code><span data-i18n=", ">, </span><code>{{numChoices}}</code><span data-i18n=". ">. </span><span data-i18n="This request is never written into the chat log and does not affect the chat context.">This request is never written into the chat log and does not affect the chat context.</span>
+            </small>
+            <textarea id="next_choices_prompt" class="text_pole textarea_compact" rows="8"></textarea>
+            <div class="menu_button" id="next_choices_prompt_reset" data-i18n="Restore default template">Restore default template</div>
+        </div>
+    </div>
+</div>

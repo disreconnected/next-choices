@@ -1,0 +1,193 @@
+/* Next Choices */
+
+.next-choices-container {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px;
+}
+
+.next-choices-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.next-choices-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.2));
+    border-radius: 8px;
+    background-color: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.3));
+    color: var(--SmartThemeBodyColor, #eee);
+    font-family: inherit;
+    font-size: calc(var(--mainFontSize, 15px) * 0.95);
+    line-height: 1.35;
+    cursor: pointer;
+    white-space: pre-wrap;
+    word-break: break-word;
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+/* Keep formatted choice text (from ST's messageFormatting) in sync with the
+   chat's own .mes_text theme coloring for quotes/italics/underline. */
+.next-choices-item p {
+    margin: 0;
+}
+
+.next-choices-item p + p {
+    margin-top: 0.5em;
+}
+
+.next-choices-item q {
+    color: var(--SmartThemeQuoteColor, inherit);
+}
+
+.next-choices-item q::before,
+.next-choices-item q::after {
+    content: none;
+}
+
+.next-choices-item em,
+.next-choices-item i {
+    color: var(--SmartThemeEmColor, inherit);
+}
+
+.next-choices-item u {
+    color: var(--SmartThemeUnderlineColor, inherit);
+}
+
+.next-choices-item:hover,
+.next-choices-item:focus-visible {
+    background-color: var(--white20a, rgba(255, 255, 255, 0.12));
+    border-color: var(--SmartThemeQuoteColor, var(--SmartThemeBodyColor, #eee));
+    transform: translateY(-1px);
+}
+
+.next-choices-item:active {
+    transform: translateY(0);
+}
+
+.next-choices-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.next-choices-tool {
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.2));
+    border-radius: 6px;
+    background-color: transparent;
+    color: var(--SmartThemeBodyColor, #eee);
+    padding: 4px 7px;
+    font-size: 0.85em;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.75;
+    transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.next-choices-tool:hover {
+    opacity: 1;
+    background-color: var(--white20a, rgba(255, 255, 255, 0.12));
+}
+
+.next-choices-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 auto;
+    padding: 8px 12px;
+    color: var(--SmartThemeBodyColor, #eee);
+    opacity: 0.8;
+    font-size: calc(var(--mainFontSize, 15px) * 0.95);
+}
+
+.next-choices-spinner {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    border: 2px solid var(--SmartThemeBodyColor, #eee);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: next-choices-spin 0.8s linear infinite;
+}
+
+@keyframes next-choices-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.next-choices-error {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex: 1 1 auto;
+    padding: 8px 12px;
+    color: var(--warning, #e57373);
+    font-size: calc(var(--mainFontSize, 15px) * 0.9);
+}
+
+.next-choices-retry {
+    flex: 0 0 auto;
+}
+
+/* Settings panel */
+
+.next-choices-settings-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 8px 0;
+}
+
+.next-choices-settings-field {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 120px;
+    min-width: 100px;
+}
+
+.next-choices-settings small {
+    display: block;
+    opacity: 0.75;
+    margin-bottom: 4px;
+}
+
+#next_choices_prompt {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: var(--monoFontFamily, monospace);
+    font-size: calc(var(--mainFontSize, 15px) * 0.85);
+}
+
+#next_choices_prompt_reset {
+    width: fit-content;
+    margin-top: 6px;
+}
+
+/* Narrow screens: keep buttons tappable, stack the toolbar horizontally */
+@media screen and (max-width: 600px) {
+    .next-choices-container {
+        flex-direction: column;
+    }
+
+    .next-choices-toolbar {
+        flex-direction: row;
+        align-self: flex-end;
+    }
+
+    .next-choices-item {
+        padding: 10px 12px;
+        min-height: 40px;
+    }
+}
