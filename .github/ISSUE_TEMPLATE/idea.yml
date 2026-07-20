@@ -1,0 +1,35 @@
+name: Idea / Note
+description: Maintainer's quick note — jot down an idea before it slips away
+title: "[Idea] "
+labels: ["idea"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: Write it down first, polish it later.
+      placeholder: What if the extension could...
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why / where it came from
+      description: Optional — the trigger or use case that sparked this idea.
+      placeholder: Noticed while chatting that...
+
+  - type: dropdown
+    id: rough-size
+    attributes:
+      label: Rough gut feeling
+      options:
+        - Quick win
+        - Needs some design
+        - Big / not sure yet
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Random notes
+      description: Optional — implementation hints, related code, links, anything.
