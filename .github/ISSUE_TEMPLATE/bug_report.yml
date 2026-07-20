@@ -1,0 +1,103 @@
+name: Bug Report
+description: Report a problem with Next Choices
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the sections below so we can reproduce the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+      placeholder: Choices stop appearing after switching chats...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Open a chat with '...'
+        2. Enable '...' in settings
+        3. Send a message
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: input
+    id: st-version
+    attributes:
+      label: SillyTavern version
+      description: Found at the bottom of the SillyTavern settings, or via `git log -1` in the SillyTavern folder.
+      placeholder: "1.12.x (release / staging)"
+    validations:
+      required: true
+
+  - type: input
+    id: extension-version
+    attributes:
+      label: Next Choices version
+      placeholder: "e.g. 1.0.0 or commit hash"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: generation-source
+    attributes:
+      label: Generation source
+      description: Which generation source is selected in the extension settings?
+      options:
+        - Current connection settings
+        - A Connection Profile
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: api-backend
+    attributes:
+      label: API / backend used for choice generation
+      placeholder: "e.g. OpenAI, Claude, KoboldCpp, OpenRouter..."
+
+  - type: input
+    id: environment
+    attributes:
+      label: Browser / OS
+      placeholder: "e.g. Chrome 126 on Windows 11, Firefox on Android"
+
+  - type: textarea
+    id: console-logs
+    attributes:
+      label: Browser console errors
+      description: Open DevTools (F12) → Console tab, and paste any relevant errors. This will be formatted as code automatically.
+      render: text
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Screenshots, custom prompt template, or anything else that might help.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues and this bug has not been reported yet.
+          required: true
+        - label: I have tried refreshing the page / restarting SillyTavern.
+          required: true
