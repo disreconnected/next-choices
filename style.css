@@ -15,6 +15,12 @@
     gap: 5px;
     flex: 1 1 auto;
     min-width: 0;
+    /* Keep lengthy generated choices from covering the conversation. */
+    max-height: min(42vh, 28rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    padding-right: 2px;
 }
 
 .next-choices-item {
