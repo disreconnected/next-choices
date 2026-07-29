@@ -6,7 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "pdatone",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "homePage": "https://github.com/pdatone/next-choices",
     "i18n": {
         "zh-tw": "i18n/zh-tw.json"

@@ -10,6 +10,7 @@
     "Prompt template": "Prompt 模板",
     "Available macros: ": "可用巨集：",
     " (recent conversation), ": "（最近對話）、",
+    " (your persona description). Other SillyTavern macros are also supported. ": "（你的玩家角色描述）。也支援其他 SillyTavern 內建巨集。",
     ", ": "、",
     ". ": "。",
     "This request is never written into the chat log and does not affect the chat context.": "此請求不會寫入聊天記錄，不影響聊天上下文。",

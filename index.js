@@ -17,7 +17,9 @@
     // Settings
     // =========================================================================
 
-    const DEFAULT_PROMPT_TEMPLATE =
+    // Kept verbatim so existing users who never customized the old default can
+    // be migrated without overwriting genuinely custom prompt templates.
+    const LEGACY_DEFAULT_PROMPT_TEMPLATE =
         'You are an assistant helping a roleplay player. Below is the recent conversation between {{user}} and {{char}}:\n\n' +
         '{{history}}\n\n' +
         'Write {{numChoices}} response options that {{user}} could say next, replying to the latest message from {{char}}.\n\n' +
@@ -25,6 +27,21 @@
         '- The motivation behind each option, and the consequences it would lead to, must differ drastically from the other options (e.g. one bold, one cautious, one creative).\n' +
         '- Write the options in the same language as the conversation.\n' +
         '- Respond ONLY with a JSON array of {{numChoices}} strings, no other text.';
+
+    const DEFAULT_PROMPT_TEMPLATE =
+        'You are an assistant helping a roleplay player. Below is the recent conversation between {{user}} and {{char}}:\n\n' +
+        '{{history}}\n\n' +
+        'Persona of {{user}} (match their voice, writing style, and inner narration):\n' +
+        '{{persona}}\n\n' +
+        'Write {{numChoices}} response options that {{user}} could say next, replying to the latest message from {{char}}.\n\n' +
+        'Requirements:\n' +
+        '- The motivation behind each option, and the consequences it would lead to, must differ drastically from the other options (e.g. one bold, one cautious, one creative).\n' +
+        '- Write the options in the same language as the conversation.\n' +
+        '- Respond ONLY with a JSON array of {{numChoices}} strings, no other text.';
+
+    // SillyTavern's macro engine must never see chat history: otherwise text in
+    // a message such as "{{persona}}" could be expanded as prompt markup.
+    const HISTORY_PLACEHOLDER = '\uE000NEXT_CHOICES_HISTORY\uE001';
 
     const DEFAULT_SETTINGS = Object.freeze({
         enabled: true,
@@ -61,6 +78,12 @@
         const stored = ctx.extensionSettings[MODULE_NAME];
         for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
             if (!(key in stored)) stored[key] = value;
+        }
+        // Upgrade only the exact former default. Custom templates are user
+        // content and must never be silently rewritten.
+        if (stored.promptTemplate === LEGACY_DEFAULT_PROMPT_TEMPLATE) {
+            stored.promptTemplate = DEFAULT_PROMPT_TEMPLATE;
+            saveSettings();
         }
         return stored;
     }
@@ -114,14 +137,45 @@
         return null;
     }
 
+    /**
+     * Returns the player's persona description, or '' if none is set.
+     */
+    function getPersonaDescription(ctx) {
+        const desc = ctx?.powerUserSettings?.persona_description;
+        return typeof desc === 'string' ? desc.trim() : '';
+    }
+
     function buildPrompt(ctx, settings) {
         const history = buildHistory(ctx, settings.historyDepth);
         const template = settings.promptTemplate || DEFAULT_PROMPT_TEMPLATE;
-        return template
-            .replaceAll('{{history}}', history)
+
+        let prompt = template
+            .replaceAll('{{history}}', HISTORY_PLACEHOLDER)
+            .replaceAll('{{numChoices}}', String(settings.numChoices));
+
+        // Prefer SillyTavern's macro engine so {{persona}} and other built-in
+        // macros such as {{description}} and {{scenario}} use native behavior.
+        if (typeof ctx?.substituteParams === 'function') {
+            try {
+                const expanded = ctx.substituteParams(prompt);
+                if (typeof expanded === 'string') {
+                    prompt = expanded;
+                } else {
+                    console.warn('[' + MODULE_NAME + '] substituteParams returned a non-string; using manual macro replacement.');
+                }
+            } catch (err) {
+                console.warn('[' + MODULE_NAME + '] substituteParams failed, using manual macro replacement:', err);
+            }
+        }
+
+        // Fallback for older SillyTavern versions, failed macro expansion, and
+        // any built-in macros left untouched by the running version.
+        prompt = prompt
             .replaceAll('{{user}}', ctx?.name1 ?? 'User')
             .replaceAll('{{char}}', ctx?.name2 ?? 'Assistant')
-            .replaceAll('{{numChoices}}', String(settings.numChoices));
+            .replaceAll('{{persona}}', getPersonaDescription(ctx));
+
+        return prompt.replaceAll(HISTORY_PLACEHOLDER, history);
     }
 
     // =========================================================================
