@@ -10,6 +10,8 @@ The UI language follows SillyTavern's **User Settings → UI Language** setting:
 
 - **Auto-generate**: choices appear automatically once an AI reply finishes rendering (switchable to a manual trigger button in the settings).
 - **Click to fill**: by default the choice text is inserted into the input box for editing; "Send on click" can be enabled instead.
+- **Larger, centered controls**: ♻️ Regenerate and ✖ Dismiss become 40×40 tappable targets, and each choice's Edit control (64×40) is vertically centered beside it. Choice text size is unchanged — the larger controls take preview width instead.
+- **Composer shortcut (optional)**: a "🎲 Generate choices" button can be shown in the composer toolbar, immediately before the person/impersonate buttons (with a fallback row inside the message box when Guided Generations is not installed). It survives Guided Generations toolbar rebuilds and only ever triggers generation.
 - **Language follows the conversation**: the prompt explicitly instructs the model to write choices in the same language as the chat.
 - **Selectable generation source**:
   - "Current connection settings" — uses your currently selected API connection.
@@ -70,7 +72,7 @@ Other **SillyTavern built-in macros** (for example, `{{description}}` and `{{sce
 1. Chat with a character as usual.
 2. When the AI reply finishes, a row of choice buttons appears above the input box (a spinner is shown while generating).
 3. Click any choice; the text fills into the input box — edit and send.
-4. On the right of the button row, ♻️ regenerates and ✖ dismisses the choices.
+4. On the right of the button row, ♻️ regenerates and ✖ dismisses the choices. If "Show Generate choices button beside the message box" is enabled, a 🎲 button in the composer toolbar generates a fresh set at any time.
 
 ## License
 
@@ -90,6 +92,8 @@ SillyTavern 第三方 UI 擴充功能：在每次 AI 角色回覆完成後，依
 
 - **自動生成**：AI 回覆渲染完成後自動產生選項（可在設定切換為手動按鈕觸發）。
 - **點選填入**：預設將選項文字填入輸入框供你編輯；也可開啟「點選後直接送出」。
+- **更大的控制按鈕**：♻️ 重新生成與 ✖ 收合加大為 40×40 的點擊目標，每個選項的「編輯」按鈕（64×40）會與選項文字垂直置中對齊。選項文字大小不變——由控制按鈕佔用預覽寬度。
+- **輸入框快捷按鈕（可選）**：可在輸入框工具列顯示「🎲 生成選項」按鈕，位於人物／扮演按鈕左側（未安裝 Guided Generations 時改為訊息框內的整列按鈕）。它能在 Guided Generations 重建工具列後自動歸位，且只會觸發生成。
 - **語言跟隨對話**：prompt 中明確指示模型使用與對話相同的語言撰寫選項。
 - **生成來源可選**：
   - 「目前連線設定」——使用你目前選用的 API 連線。
@@ -150,7 +154,7 @@ SillyTavern 第三方 UI 擴充功能：在每次 AI 角色回覆完成後，依
 1. 與角色正常對話。
 2. AI 回覆完成後，輸入框上方會出現選項按鈕列（生成中會顯示轉圈動畫）。
 3. 點選任一選項，文字會填入輸入框，編輯後送出即可。
-4. 按鈕列右側的 ♻️ 可重新生成，✖ 可收合選項列。
+4. 按鈕列右側的 ♻️ 可重新生成，✖ 可收合選項列。若開啟「在訊息輸入框旁顯示生成選項按鈕」，輸入框工具列的 🎲 按鈕可隨時生成一組新選項。
 
 ## 授權
 
