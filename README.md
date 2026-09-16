@@ -1,3 +1,37 @@
+# Next Choices (fork)
+
+Fork of [pdatone/next-choices](https://github.com/pdatone/next-choices) with the enhancements listed
+below. The upstream README is reproduced unchanged at the bottom of this file.
+
+## Enhancements on this fork
+
+### Larger, centered choice controls
+- ♻️ **Regenerate** and ✖ **Dismiss** are now 40×40 tappable targets (themed border/background preserved, translated `aria-label`s added), with a 6px gap between them.
+- **Edit** is now a 64×40 button with vertically centered content, and each row centers its controls against the choice text — so Edit lines up with the middle of single-line, multi-paragraph and long unbroken choices alike (measured center-Y delta ≤ 0.01px).
+- Choice text size, padding, markdown formatting and lack of truncation are unchanged: the larger controls take preview width instead of the text shrinking.
+
+### Optional composer "Generate choices" button
+- New opt-in setting **Show Generate choices button beside the message box** (`showQuickGenerateButton`, default **Off**).
+- When enabled, a 🎲 button appears in the Guided Generations composer toolbar, immediately before the person/impersonate buttons (first in the group when no person buttons are enabled). Without Guided Generations it falls back to a full-width row inside the message box, never the narrow mobile column.
+- The button survives Guided Generations rebuilding its toolbar (`innerHTML = ''`) and re-mounts after the composer is re-rendered.
+- It only triggers generation: activating it never selects a choice, fills or submits the composer, or writes settings. Turning the option (or the extension) off removes the button and keeps the preference.
+
+### Settings added by this fork
+| Setting | Default | Description |
+| --- | --- | --- |
+| Show Generate choices button beside the message box | Off | Shows the 🎲 generate button in the composer toolbar (see above). Display-only: it never clears choices or changes auto-generation. |
+
+### Usage additions
+- The choice row's ♻️ regenerates and ✖ dismisses the choices as before, now with larger targets alongside a centered **Edit** per choice.
+- With the composer button enabled, clicking 🎲 in the toolbar generates a fresh set of choices at any time, without opening the wand menu.
+
+### Version
+- This fork's manifest is at **0.3.0**.
+
+---
+
+# Original README (upstream, unchanged)
+
 # Next Choices
 
 A third-party UI extension for SillyTavern. After each AI character reply, it generates 3 suggested player responses based on the recent conversation and shows them as a button row above the input area. Clicking a choice fills it into the input box so you can edit before sending.
@@ -10,8 +44,6 @@ The UI language follows SillyTavern's **User Settings → UI Language** setting:
 
 - **Auto-generate**: choices appear automatically once an AI reply finishes rendering (switchable to a manual trigger button in the settings).
 - **Click to fill**: by default the choice text is inserted into the input box for editing; "Send on click" can be enabled instead.
-- **Larger, centered controls**: ♻️ Regenerate and ✖ Dismiss become 40×40 tappable targets, and each choice's Edit control (64×40) is vertically centered beside it. Choice text size is unchanged — the larger controls take preview width instead.
-- **Composer shortcut (optional)**: a "🎲 Generate choices" button can be shown in the composer toolbar, immediately before the person/impersonate buttons (with a fallback row inside the message box when Guided Generations is not installed). It survives Guided Generations toolbar rebuilds and only ever triggers generation.
 - **Language follows the conversation**: the prompt explicitly instructs the model to write choices in the same language as the chat.
 - **Selectable generation source**:
   - "Current connection settings" — uses your currently selected API connection.
@@ -44,7 +76,6 @@ Expand "Next Choices" in the Extensions panel:
 | Enable extension | On | Master switch. |
 | Auto-generate | On | Generate choices automatically after each AI reply; when off, a "🎲 Generate choices" button appears above the input box for manual triggering. |
 | Send on click | Off | When on, clicking a choice sends it immediately; by default it is only inserted into the input box for editing. |
-| Generate choices button | Off | Show a "🎲 Generate choices" button in the composer toolbar, immediately before the person/impersonate buttons, so choices can be generated without opening the wand menu. Purely a display toggle: it never changes the choices list or auto-generation. |
 | Generation source | Current connection settings | Generate choices with your current API connection or any saved Connection Profile. |
 | Number of choices | 3 | How many choices to generate each time. |
 | Max tokens | 500 | Token limit for the generation request. |
@@ -72,7 +103,7 @@ Other **SillyTavern built-in macros** (for example, `{{description}}` and `{{sce
 1. Chat with a character as usual.
 2. When the AI reply finishes, a row of choice buttons appears above the input box (a spinner is shown while generating).
 3. Click any choice; the text fills into the input box — edit and send.
-4. On the right of the button row, ♻️ regenerates and ✖ dismisses the choices. If "Show Generate choices button beside the message box" is enabled, a 🎲 button in the composer toolbar generates a fresh set at any time.
+4. On the right of the button row, ♻️ regenerates and ✖ dismisses the choices.
 
 ## License
 
