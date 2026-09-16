@@ -586,11 +586,17 @@
         // is supplied here; renderError passes none and gets no button.
         const toolbar = makeToolbar(() => {
             if (enhancementBusy) return;
-            setPanelOpen(!$panel.is(':visible'));
+            setPanelOpen(!$panelWrap.is(':visible'));
         });
 
         // --- Guidance panel (hidden until the Enhance toolbar button) ---
-        const $panel = $('<div class="next-choices-guidance" id="next_choices_guidance_panel"></div>').hide();
+        // The wrap is the disclosure unit: it carries the live status as a
+        // sibling of the panel (outside its aria-busy subtree), so it — not
+        // the bare panel — is what gets shown/hidden. Hiding only the panel
+        // would leave error/edit notices rendered and announcing while the
+        // panel is closed.
+        const $panelWrap = $('<div class="next-choices-guidance-wrap"></div>').hide();
+        const $panel = $('<div class="next-choices-guidance" id="next_choices_guidance_panel"></div>');
         const $panelLabel = $('<label for="next_choices_guidance_input"></label>').text(tr('Enhancement prompt'));
         const $guidanceInput = $('<textarea id="next_choices_guidance_input" class="text_pole next-choices-guidance-input" rows="3"></textarea>');
         const $panelHint = $('<div class="next-choices-guidance-hint"></div>')
@@ -640,7 +646,7 @@
 
         const setPanelOpen = (open) => {
             if (open) {
-                $panel.show();
+                $panelWrap.show();
                 // Persona can change between openings; refresh the exemplar
                 // each time so it stays current and localized.
                 $guidanceInput.attr('placeholder', placeholderExemplars());
@@ -649,12 +655,11 @@
             } else {
                 // Closing keeps the draft for this displayed list; the draft
                 // only dies with the list itself (dismiss / re-render).
-                $panel.hide();
+                $panelWrap.hide();
                 toolbar.$enhance.attr('aria-expanded', 'false');
                 toolbar.$enhance.trigger('focus');
             }
         };
-
         $panelClose.on('click', () => {
             if (!enhancementBusy) setPanelOpen(false);
         });
@@ -762,7 +767,9 @@
         // The live status stays OUTSIDE the panel: aria-busy on an ancestor
         // makes assistive tech defer live-region updates inside it, so the
         // "Enhancing choices…" announcement would never be spoken.
-        const $panelWrap = $('<div class="next-choices-guidance-wrap"></div>');
+        // The live status stays OUTSIDE the panel (see the wrap declaration
+        // above): aria-busy on an ancestor makes assistive tech defer
+        // live-region updates inside it.
         $panelWrap.append($panel, $status);
         $panel.append($panelLabel, $guidanceInput, $panelHint, $panelActions);
 
