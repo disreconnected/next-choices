@@ -20,6 +20,9 @@ below. The upstream README is reproduced unchanged at the bottom of this file.
 | Setting | Default | Description |
 | --- | --- | --- |
 | Show Generate choices button beside the message box | Off | Shows the 🎲 generate button in the composer toolbar (see above). Display-only: it never clears choices or changes auto-generation. |
+| 生成選項按鈕 | 關 | 在輸入框工具列顯示「🎲 生成選項」按鈕（位於人物／扮演按鈕左側），不必開啟魔杖選單即可生成選項。純粹是顯示開關：不會更動選項列或自動生成設定。 |
+
+The Chinese half reproduced below is the upstream README, so its settings table lists upstream settings only; this fork's addition is the translated row above.
 
 ### Usage additions
 - The choice row's ♻️ regenerates and ✖ dismisses the choices as before, now with larger targets alongside a centered **Edit** per choice.
