@@ -10,6 +10,8 @@ The UI language follows SillyTavern's **User Settings → UI Language** setting:
 
 - **Auto-generate**: choices appear automatically once an AI reply finishes rendering (switchable to a manual trigger button in the settings).
 - **Click to fill**: by default the choice text is inserted into the input box for editing; "Send on click" can be enabled instead.
+- **Larger, centered controls**: ♻️ Regenerate and ✖ Dismiss become 40×40 tappable targets, and each choice's Edit control (64×40) is vertically centered beside it. Choice text size is unchanged — the larger controls take preview width instead.
+- **Composer shortcut (optional)**: a "🎲 Generate choices" button can be shown in the composer toolbar, immediately before the person/impersonate buttons (with a fallback row inside the message box when Guided Generations is not installed). It survives Guided Generations toolbar rebuilds and only ever triggers generation.
 - **Language follows the conversation**: the prompt explicitly instructs the model to write choices in the same language as the chat.
 - **Selectable generation source**:
   - "Current connection settings" — uses your currently selected API connection.
@@ -42,6 +44,7 @@ Expand "Next Choices" in the Extensions panel:
 | Enable extension | On | Master switch. |
 | Auto-generate | On | Generate choices automatically after each AI reply; when off, a "🎲 Generate choices" button appears above the input box for manual triggering. |
 | Send on click | Off | When on, clicking a choice sends it immediately; by default it is only inserted into the input box for editing. |
+| Generate choices button | Off | Show a "🎲 Generate choices" button in the composer toolbar, immediately before the person/impersonate buttons, so choices can be generated without opening the wand menu. Purely a display toggle: it never changes the choices list or auto-generation. |
 | Generation source | Current connection settings | Generate choices with your current API connection or any saved Connection Profile. |
 | Number of choices | 3 | How many choices to generate each time. |
 | Max tokens | 500 | Token limit for the generation request. |
@@ -69,7 +72,7 @@ Other **SillyTavern built-in macros** (for example, `{{description}}` and `{{sce
 1. Chat with a character as usual.
 2. When the AI reply finishes, a row of choice buttons appears above the input box (a spinner is shown while generating).
 3. Click any choice; the text fills into the input box — edit and send.
-4. On the right of the button row, ♻️ regenerates and ✖ dismisses the choices.
+4. On the right of the button row, ♻️ regenerates and ✖ dismisses the choices. If "Show Generate choices button beside the message box" is enabled, a 🎲 button in the composer toolbar generates a fresh set at any time.
 
 ## License
 
