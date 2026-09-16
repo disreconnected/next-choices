@@ -179,6 +179,35 @@
         return prompt.replaceAll(HISTORY_PLACEHOLDER, history);
     }
 
+    /**
+     * Builds a prompt that asks the model to enhance the already displayed
+     * choices according to the user's guidance instead of inventing new ones.
+     * Reuses buildPrompt (persona, history, custom template, native macros)
+     * with numChoices pinned to the displayed list, then appends the
+     * enhancement task as literal data AFTER macro expansion: JSON-encoded
+     * originals and guidance can never be treated as prompt markup or leak
+     * through substituteParams.
+     */
+    function buildEnhancementPrompt(ctx, settings, choices, guidance) {
+        const base = buildPrompt(ctx, { ...settings, numChoices: choices.length });
+        const payload = JSON.stringify(
+            {
+                task: 'Enhance each response option below according to the guidance. This task overrides the previous instruction to write new options.',
+                guidance,
+                choices,
+                requirements: [
+                    'For every choice, keep its existing position, main actions, dialogue, intention, scene facts, voice, language, and distinct approach.',
+                    'Weave in or append actions and dialogue that support the guidance; do not remove the existing substance or start over.',
+                    'Do not combine, reorder, or add options.',
+                    'Return the complete enhanced version of every choice (not only the additions) as a JSON array of exactly ' + choices.length + ' nonempty strings, with no commentary.',
+                ],
+            },
+            null,
+            2,
+        );
+        return base + '\n\n=== Next Choices enhancement task ===\n' + payload + '\n=== End of Next Choices enhancement task ===';
+    }
+
     // =========================================================================
     // Generation
     // =========================================================================
@@ -323,9 +352,30 @@
         return items.slice(0, max);
     }
 
-    // =========================================================================
-    // UI: choices bar
-    // =========================================================================
+    /**
+     * Extracts exactly `expectedCount` enhanced choice strings from the raw
+     * model output. Unlike parseChoices this is atomic: anything other than
+     * a JSON array of exactly `expectedCount` nonempty strings rejects the
+     * whole response (returns null). No filtering, truncation, object
+     * aliases, or numbered-line fallback: those could silently map an
+     * enhancement onto the wrong original choice.
+     */
+    function parseEnhancedChoices(text, expectedCount) {
+        if (typeof text !== 'string' || !text.trim()) return null;
+        const start = text.indexOf('[');
+        const end = text.lastIndexOf(']');
+        if (start === -1 || end <= start) return null;
+        let arr;
+        try {
+            arr = JSON.parse(text.slice(start, end + 1));
+        } catch {
+            return null;
+        }
+        if (!Array.isArray(arr) || arr.length !== expectedCount) return null;
+        const items = arr.map((item) => (typeof item === 'string' ? item.trim() : null));
+        if (items.some((item) => !item)) return null;
+        return items;
+    }
 
     function getContainer() {
         let $container = $(`#${CONTAINER_ID}`);
@@ -351,21 +401,33 @@
         $container.empty().hide();
     }
 
-    function makeToolbar() {
+    function makeToolbar(onEnhance = null) {
         const $toolbar = $('<div class="next-choices-toolbar"></div>');
         const $regen = $('<button type="button" class="next-choices-tool next-choices-regenerate"></button>')
             .text('♻️')
             .attr('title', tr('Regenerate'))
             .attr('aria-label', tr('Regenerate'));
         $regen.on('click', () => generateChoices('manual'));
+
+        let $enhance = $();
+        if (typeof onEnhance === 'function') {
+            $enhance = $('<button type="button" class="next-choices-tool next-choices-enhance"></button>')
+                .text(tr('Enhance'))
+                .attr('title', tr('Enhance choices'))
+                .attr('aria-label', tr('Enhance choices'))
+                .attr('aria-controls', 'next_choices_guidance_panel')
+                .attr('aria-expanded', 'false');
+            $enhance.on('click', () => onEnhance());
+        }
+
         const $close = $('<button type="button" class="next-choices-tool next-choices-dismiss"></button>')
             .text('✖')
             .attr('title', tr('Dismiss'))
             .attr('aria-label', tr('Dismiss'));
         // Dismiss only hides the list. It is not a request cancellation control.
         $close.on('click', () => clearChoicesUI());
-        $toolbar.append($regen, $close);
-        return $toolbar;
+        $toolbar.append($regen, $enhance, $close);
+        return { $toolbar, $enhance };
     }
 
     function renderLoading() {
@@ -386,7 +448,7 @@
         const $retry = $('<button type="button" class="next-choices-retry menu_button"></button>').text(tr('Retry'));
         $retry.on('click', () => generateChoices('manual'));
         $error.append($retry);
-        $container.append($error, makeToolbar());
+        $container.append($error, makeToolbar().$toolbar);
     }
 
     /**
@@ -414,32 +476,35 @@
     function renderChoices(choices) {
         const $container = getContainer();
         if (!$container.length) return;
+        // Shared committed text: preview, selection, editor init, Apply, and
+        // enhancement requests all read/write this one render-local array.
+        // Never reconstructed from rendered HTML.
         $container.empty().show();
-
+        const currentChoices = choices.map((choice) => String(choice ?? ''));
+        let openEditors = 0;
+        let enhancementBusy = false;
+        const rowRefs = [];
         const $list = $('<div class="next-choices-list"></div>');
         choices.forEach((choice, index) => {
-            // Per-row editing state. `committedText` is the last applied text
-            // (initially the generated string); the textarea owns the live
-            // draft while editing. Everything stays local to this closure, so
-            // any container .empty() (dismiss, regenerate, chat change, …)
-            // discards drafts and applied edits with the DOM.
-            let committedText = String(choice ?? '');
+            // Per-row editing state: currentChoices[index] is the last
+            // applied text (initially the generated string); the textarea
+            // owns the live draft while editing.
             const number = index + 1;
-
             const $row = $('<div class="next-choices-row"></div>');
 
             // --- Selection target: fills the composer with applied text ---
             const $btn = $('<button type="button" class="next-choices-item"></button>');
             const renderPreview = () => {
-                const formatted = formatChoiceHtml(committedText);
+                const text = currentChoices[index];
+                const formatted = formatChoiceHtml(text);
                 if (formatted !== null) {
                     $btn.html(formatted);
                 } else {
-                    $btn.text(committedText);
+                    $btn.text(text);
                 }
             };
             renderPreview();
-            $btn.on('click', () => applyChoice(committedText));
+            $btn.on('click', () => applyChoice(currentChoices[index]));
 
             // --- Edit control ---
             const $edit = $('<button type="button" class="next-choices-edit next-choices-tool"></button>');
@@ -468,19 +533,21 @@
 
             const setEditing = (editing) => {
                 if (editing) {
+                    openEditors++;
                     $btn.hide();
                     $edit.hide();
                     $editor.show();
                     $input.trigger('focus');
                 } else {
+                    openEditors = Math.max(0, openEditors - 1);
                     $editor.hide();
                     $btn.show();
                     $edit.show();
                 }
+                refreshGuidanceAvailability();
             };
-
             $edit.on('click', () => {
-                $input.val(committedText);
+                $input.val(currentChoices[index]);
                 refreshApplyState();
                 setEditing(true);
             });
@@ -491,13 +558,13 @@
             $apply.on('click', () => {
                 const draft = String($input.val() ?? '');
                 if (!draft.trim()) return;
-                committedText = draft;
+                currentChoices[index] = draft;
                 renderPreview();
                 setEditing(false);
                 $edit.trigger('focus');
             });
 
-            // Reset discards the draft; committedText (last applied text) is
+            // Reset discards the draft; the committed text in currentChoices is
             // deliberately untouched, so a first-time reset restores the
             // original generated text and a later one restores the last
             // applied edit.
@@ -512,8 +579,208 @@
             $editor.append($input, $actions);
             $row.append($btn, $edit, $editor);
             $list.append($row);
+            rowRefs.push({ $btn, $edit });
         });
-        $container.append($list, makeToolbar());
+
+        // The toolbar's Enhance button exists only because a toggle callback
+        // is supplied here; renderError passes none and gets no button.
+        const toolbar = makeToolbar(() => {
+            if (enhancementBusy) return;
+            setPanelOpen(!$panelWrap.is(':visible'));
+        });
+
+        // --- Guidance panel (hidden until the Enhance toolbar button) ---
+        // The wrap is the disclosure unit: it carries the live status as a
+        // sibling of the panel (outside its aria-busy subtree), so it — not
+        // the bare panel — is what gets shown/hidden. Hiding only the panel
+        // would leave error/edit notices rendered and announcing while the
+        // panel is closed.
+        const $panelWrap = $('<div class="next-choices-guidance-wrap"></div>').hide();
+        const $panel = $('<div class="next-choices-guidance" id="next_choices_guidance_panel"></div>');
+        const $panelLabel = $('<label for="next_choices_guidance_input"></label>').text(tr('Enhancement prompt'));
+        const $guidanceInput = $('<textarea id="next_choices_guidance_input" class="text_pole next-choices-guidance-input" rows="3"></textarea>');
+        const $panelHint = $('<div class="next-choices-guidance-hint"></div>')
+            .text(tr("Keeps each choice's main content and adds your direction."));
+        // Same keydown policy as the row editors: Enter stays a native
+        // newline and host shortcuts never see this textarea. Submission is
+        // explicit; there is no implicit shortcut.
+        $guidanceInput.on('keydown', (event) => event.stopPropagation());
+
+        const $status = $('<div class="next-choices-guidance-status" role="status" aria-live="polite"></div>');
+        const setStatus = (message) => { $status.text(message ?? ''); };
+
+        const $submit = $('<button type="button" class="next-choices-tool next-choices-guidance-submit"></button>')
+            .text(tr('Enhance choices'));
+
+        // Localize the base exemplars first, then splice the persona name into
+        // the translated template so host dictionaries only ever see stable keys.
+        function placeholderExemplars() {
+            const ctx = getContext();
+            const name = (ctx?.name1 || '').trim();
+            if (!name) return tr('e.g. reassure her');
+            return tr('e.g. have {name} reassure her').replaceAll('{name}', name);
+        }
+
+        const $panelClose = $('<button type="button" class="next-choices-tool next-choices-guidance-close"></button>')
+            .text(tr('Close'));
+
+        const setPanelControlsDisabled = (disabled) => {
+            $guidanceInput.prop('disabled', disabled);
+            $submit.prop('disabled', disabled);
+            $panelClose.prop('disabled', disabled);
+        };
+
+        const refreshGuidanceAvailability = () => {
+            const hasGuidance = String($guidanceInput.val() ?? '').trim().length > 0;
+            const editing = openEditors > 0;
+            const busy = enhancementBusy;
+            $submit.prop('disabled', busy || !hasGuidance || editing);
+            if (editing) {
+                setStatus(tr('Apply or reset your edits before enhancing choices.'));
+            } else if (!busy) {
+                setStatus('');
+            }
+            // While busy the panel keeps its busy notice; setBusy owns it.
+        };
+        $guidanceInput.on('input', refreshGuidanceAvailability);
+
+        const setPanelOpen = (open) => {
+            if (open) {
+                $panelWrap.show();
+                // Persona can change between openings; refresh the exemplar
+                // each time so it stays current and localized.
+                $guidanceInput.attr('placeholder', placeholderExemplars());
+                toolbar.$enhance.attr('aria-expanded', 'true');
+                $guidanceInput.trigger('focus');
+            } else {
+                // Closing keeps the draft for this displayed list; the draft
+                // only dies with the list itself (dismiss / re-render).
+                $panelWrap.hide();
+                toolbar.$enhance.attr('aria-expanded', 'false');
+                toolbar.$enhance.trigger('focus');
+            }
+        };
+        $panelClose.on('click', () => {
+            if (!enhancementBusy) setPanelOpen(false);
+        });
+
+        const setBusy = (busy) => {
+            enhancementBusy = busy;
+            setRowsInteractive(!busy);
+            $list.toggleClass('next-choices-list-locked', busy);
+            toolbar.$enhance.prop('disabled', busy);
+            $panel.attr('aria-busy', busy ? 'true' : 'false');
+            setPanelControlsDisabled(busy);
+            if (busy) {
+                setStatus(tr('Enhancing choices…'));
+            } else {
+                refreshGuidanceAvailability();
+            }
+        };
+
+        const isViewCurrent = () => document.getElementById(CONTAINER_ID) === $container[0]
+            && $content.parent()[0] === $container[0]
+            && $container.children()[0] === $content[0];
+
+        const setRowsInteractive = (interactive) => {
+            for (const row of rowRefs) {
+                row.$btn.prop('disabled', !interactive);
+                row.$edit.prop('disabled', !interactive);
+            }
+        };
+
+        const enhanceDisplayedChoices = async () => {
+            if (enhancementBusy) return;
+            if (!isViewCurrent() || !getSettings().enabled) return;
+
+            const guidance = String($guidanceInput.val() ?? '').trim();
+            if (!guidance) return;
+
+            const ctx = getContext();
+            if (!ctx || !getLastMessage(ctx)) {
+                // Keep rows and the entered guidance; only report.
+                setStatus(tr('No conversation is available to enhance these choices.'));
+                return;
+            }
+            if (openEditors > 0) {
+                refreshGuidanceAvailability();
+                return;
+            }
+
+            // Snapshot committed text and settings before any await: edits
+            // or preference changes made while the request is in flight must
+            // not leak into this request or its validation count.
+            const originals = currentChoices.slice();
+            const settings = { ...getSettings() };
+
+            clearTimeout(autoGenerateTimer);
+            abortPending();
+            const myRequestId = requestId;
+            abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            generating = true;
+            setBusy(true);
+
+            let response;
+            try {
+                const prompt = buildEnhancementPrompt(ctx, settings, originals, guidance);
+                response = await sendRawRequest(ctx, settings, prompt);
+            } catch (err) {
+                if (myRequestId !== requestId) return; // stale, ignore
+                generating = false;
+                // Same detached-view guard as the success path: a rejected
+                // request for a dismissed list must not resurrect controls or
+                // log noise for UI that was deliberately discarded.
+                if (!isViewCurrent()) return;
+                setBusy(false);
+                console.error(`[${MODULE_NAME}] Enhancement failed:`, err);
+                setStatus(tr('Failed to enhance choices: ') + (err?.message ?? String(err)));
+                return;
+            }
+
+            if (myRequestId !== requestId) return; // stale, ignore
+            generating = false;
+
+            // Second guard: even when the underlying request could not be
+            // aborted, a detached/replaced view must never resurrect old
+            // choices or surface an error into the new view.
+            if (!isViewCurrent()) return;
+
+            const enhanced = parseEnhancedChoices(response, originals.length);
+            if (!enhanced) {
+                setBusy(false);
+                setStatus(tr('Could not parse one enhanced choice for every original choice. Try again.'));
+                return;
+            }
+
+            // Success: one atomic replace. The new render owns fresh state;
+            // its panel starts hidden with an empty draft, and the next
+            // enhancement uses the enhanced text as its committed baseline.
+            renderChoices(enhanced);
+            const $newEnhance = $(`#${CONTAINER_ID} .next-choices-enhance`).first();
+            if ($newEnhance.length) $newEnhance.trigger('focus');
+        };
+
+        $submit.on('click', () => enhanceDisplayedChoices());
+
+        const $panelActions = $('<div class="next-choices-guidance-actions"></div>');
+        $panelActions.append($submit, $panelClose);
+        // The live status stays OUTSIDE the panel: aria-busy on an ancestor
+        // makes assistive tech defer live-region updates inside it, so the
+        // "Enhancing choices…" announcement would never be spoken.
+        // The live status stays OUTSIDE the panel (see the wrap declaration
+        // above): aria-busy on an ancestor makes assistive tech defer
+        // live-region updates inside it.
+        $panelWrap.append($panel, $status);
+        $panel.append($panelLabel, $guidanceInput, $panelHint, $panelActions);
+
+        // Initial availability pass: without it a freshly rendered panel would
+        // open with submit enabled even though the draft is empty (the input
+        // handler only fires after the user types).
+        refreshGuidanceAvailability();
+
+        const $content = $('<div class="next-choices-content"></div>');
+        $content.append($list, $panelWrap);
+        $container.append($content, toolbar.$toolbar);
     }
 
     function applyChoice(choiceText) {

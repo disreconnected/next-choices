@@ -31,5 +31,17 @@
     "Edit": "編輯",
     "Edit choice": "編輯選項",
     "Apply changes": "套用變更",
-    "Reset changes": "重設變更"
+    "Reset changes": "重設變更",
+    "Enhance": "增強",
+    "Enhance choices": "增強選項",
+    "Enhancement prompt": "增強提示",
+    "Keeps each choice's main content and adds your direction.": "保留每個選項的主要內容，並加入你的指示。",
+    "Close": "關閉",
+    "Enhancing choices…": "增強選項中…",
+    "Apply or reset your edits before enhancing choices.": "增強選項前，請先套用或重設你的編輯。",
+    "No conversation is available to enhance these choices.": "沒有可用於增強這些選項的對話。",
+    "Failed to enhance choices: ": "增強選項失敗：",
+    "Could not parse one enhanced choice for every original choice. Try again.": "無法為每個原始選項解析出一個增強後的選項，請再試一次。",
+    "e.g. reassure her": "例如：安慰她",
+    "e.g. have {name} reassure her": "例如：讓 {name} 安慰她"
 }
