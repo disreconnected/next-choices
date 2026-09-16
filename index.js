@@ -722,6 +722,10 @@
             } catch (err) {
                 if (myRequestId !== requestId) return; // stale, ignore
                 generating = false;
+                // Same detached-view guard as the success path: a rejected
+                // request for a dismissed list must not resurrect controls or
+                // log noise for UI that was deliberately discarded.
+                if (!isViewCurrent()) return;
                 setBusy(false);
                 console.error(`[${MODULE_NAME}] Enhancement failed:`, err);
                 setStatus(tr('Failed to enhance choices: ') + (err?.message ?? String(err)));
@@ -755,7 +759,12 @@
 
         const $panelActions = $('<div class="next-choices-guidance-actions"></div>');
         $panelActions.append($submit, $panelClose);
-        $panel.append($panelLabel, $guidanceInput, $panelHint, $panelActions, $status);
+        // The live status stays OUTSIDE the panel: aria-busy on an ancestor
+        // makes assistive tech defer live-region updates inside it, so the
+        // "Enhancing choices…" announcement would never be spoken.
+        const $panelWrap = $('<div class="next-choices-guidance-wrap"></div>');
+        $panelWrap.append($panel, $status);
+        $panel.append($panelLabel, $guidanceInput, $panelHint, $panelActions);
 
         // Initial availability pass: without it a freshly rendered panel would
         // open with submit enabled even though the draft is empty (the input
@@ -763,7 +772,7 @@
         refreshGuidanceAvailability();
 
         const $content = $('<div class="next-choices-content"></div>');
-        $content.append($list, $panel);
+        $content.append($list, $panelWrap);
         $container.append($content, toolbar.$toolbar);
     }
 
