@@ -48,6 +48,7 @@
         autoGenerate: true,      // auto (event-driven) / manual (button)
         autoSend: false,         // send immediately on click
         profileId: 'current',    // 'current' or a connection profile id
+        showQuickGenerateButton: false, // composer toolbar shortcut (opt-in)
         numChoices: 3,
         maxTokens: 500,
         historyDepth: 4,
@@ -352,9 +353,16 @@
 
     function makeToolbar() {
         const $toolbar = $('<div class="next-choices-toolbar"></div>');
-        const $regen = $('<button type="button" class="next-choices-tool">♻️</button>').attr('title', tr('Regenerate'));
+        const $regen = $('<button type="button" class="next-choices-tool next-choices-regenerate"></button>')
+            .text('♻️')
+            .attr('title', tr('Regenerate'))
+            .attr('aria-label', tr('Regenerate'));
         $regen.on('click', () => generateChoices('manual'));
-        const $close = $('<button type="button" class="next-choices-tool">✖</button>').attr('title', tr('Dismiss'));
+        const $close = $('<button type="button" class="next-choices-tool next-choices-dismiss"></button>')
+            .text('✖')
+            .attr('title', tr('Dismiss'))
+            .attr('aria-label', tr('Dismiss'));
+        // Dismiss only hides the list. It is not a request cancellation control.
         $close.on('click', () => clearChoicesUI());
         $toolbar.append($regen, $close);
         return $toolbar;
@@ -409,17 +417,102 @@
         $container.empty().show();
 
         const $list = $('<div class="next-choices-list"></div>');
-        for (const choice of choices) {
+        choices.forEach((choice, index) => {
+            // Per-row editing state. `committedText` is the last applied text
+            // (initially the generated string); the textarea owns the live
+            // draft while editing. Everything stays local to this closure, so
+            // any container .empty() (dismiss, regenerate, chat change, …)
+            // discards drafts and applied edits with the DOM.
+            let committedText = String(choice ?? '');
+            const number = index + 1;
+
+            const $row = $('<div class="next-choices-row"></div>');
+
+            // --- Selection target: fills the composer with applied text ---
             const $btn = $('<button type="button" class="next-choices-item"></button>');
-            const formatted = formatChoiceHtml(choice);
-            if (formatted !== null) {
-                $btn.html(formatted);
-            } else {
-                $btn.text(choice);
-            }
-            $btn.on('click', () => applyChoice(choice));
-            $list.append($btn);
-        }
+            const renderPreview = () => {
+                const formatted = formatChoiceHtml(committedText);
+                if (formatted !== null) {
+                    $btn.html(formatted);
+                } else {
+                    $btn.text(committedText);
+                }
+            };
+            renderPreview();
+            $btn.on('click', () => applyChoice(committedText));
+
+            // --- Edit control ---
+            const $edit = $('<button type="button" class="next-choices-edit next-choices-tool"></button>');
+            $edit.text(tr('Edit'));
+            $edit.attr('aria-label', `${tr('Edit choice')} ${number}`);
+
+            // --- Inline editor (hidden until Edit is pressed) ---
+            const $editor = $('<div class="next-choices-editor"></div>').hide();
+            const $input = $('<textarea class="text_pole next-choices-edit-input" rows="4"></textarea>');
+            $input.attr('aria-label', `${tr('Edit choice')} ${number}`);
+            // Keep Enter as a native newline; stop it from bubbling to host
+            // shortcuts without interfering with native editing. No submit
+            // shortcut: applying is explicit.
+            $input.on('keydown', (event) => event.stopPropagation());
+
+            const $apply = $('<button type="button" class="next-choices-apply next-choices-tool"></button>');
+            $apply.text(tr('Apply changes'));
+            const $reset = $('<button type="button" class="next-choices-reset next-choices-tool"></button>');
+            $reset.text(tr('Reset changes'));
+
+            const refreshApplyState = () => {
+                const hasText = String($input.val() ?? '').trim().length > 0;
+                $apply.prop('disabled', !hasText);
+            };
+            $input.on('input', refreshApplyState);
+
+            const setEditing = (editing) => {
+                if (editing) {
+                    $btn.hide();
+                    $edit.hide();
+                    $editor.show();
+                    $input.trigger('focus');
+                } else {
+                    $editor.hide();
+                    $btn.show();
+                    $edit.show();
+                }
+            };
+
+            $edit.on('click', () => {
+                $input.val(committedText);
+                refreshApplyState();
+                setEditing(true);
+            });
+
+            // Apply stores the exact draft (whitespace/newlines preserved);
+            // trimming is for validation only. Unchanged nonempty text may be
+            // applied so it just closes editing.
+            $apply.on('click', () => {
+                const draft = String($input.val() ?? '');
+                if (!draft.trim()) return;
+                committedText = draft;
+                renderPreview();
+                setEditing(false);
+                $edit.trigger('focus');
+            });
+
+            // Reset discards the draft; committedText (last applied text) is
+            // deliberately untouched, so a first-time reset restores the
+            // original generated text and a later one restores the last
+            // applied edit.
+            $reset.on('click', () => {
+                $input.val('');
+                setEditing(false);
+                $edit.trigger('focus');
+            });
+
+            const $actions = $('<div class="next-choices-edit-actions"></div>');
+            $actions.append($apply, $reset);
+            $editor.append($input, $actions);
+            $row.append($btn, $edit, $editor);
+            $list.append($row);
+        });
         $container.append($list, makeToolbar());
     }
 
@@ -515,6 +608,7 @@
         $('#next_choices_enabled').prop('checked', getSettings().enabled);
         $('#next_choices_auto_generate').prop('checked', getSettings().autoGenerate);
         $('#next_choices_auto_send').prop('checked', getSettings().autoSend);
+        $('#next_choices_show_quick_generate').prop('checked', getSettings().showQuickGenerateButton);
         $('#next_choices_num').val(getSettings().numChoices);
         $('#next_choices_max_tokens').val(getSettings().maxTokens);
         $('#next_choices_history_depth').val(getSettings().historyDepth);
@@ -534,6 +628,7 @@
             } else {
                 $('#next_choices_wand_button').hide();
             }
+            updateQuickGenerateButton();
         });
         $('#next_choices_auto_generate').on('change', function () {
             getSettings().autoGenerate = !!$(this).prop('checked');
@@ -545,6 +640,13 @@
         $('#next_choices_auto_send').on('change', function () {
             getSettings().autoSend = !!$(this).prop('checked');
             saveSettings();
+        });
+        // Purely a display preference: it never touches the choices list,
+        // in-flight generations, or auto-generation.
+        $('#next_choices_show_quick_generate').on('change', function () {
+            getSettings().showQuickGenerateButton = !!$(this).prop('checked');
+            saveSettings();
+            updateQuickGenerateButton();
         });
         $('#next_choices_profile').on('change', function () {
             getSettings().profileId = String($(this).val() || 'current');
@@ -662,6 +764,224 @@
     }
 
     // =========================================================================
+    // UI: composer quick-generate shortcut
+    // =========================================================================
+
+    const QUICK_BUTTON_ID = 'next_choices_quick_generate';
+    const QUICK_ROW_ID = 'next_choices_quick_actions';
+    const QUICK_HOST_CLASS = 'next-choices-quick-host';
+    const QUICK_IMPERSONATE_SELECTOR =
+        '#gg_impersonate_button, #gg_impersonate_button_2nd, #gg_impersonate_button_3rd';
+    const QUICK_WATCH_SELECTOR = [
+        '#send_form',
+        '#nonQRFormItems',
+        '#gg-action-button-container',
+        '#gg-regular-buttons-container',
+        `#${QUICK_ROW_ID}`,
+        `#${QUICK_BUTTON_ID}`,
+    ].join(', ');
+
+    let quickGenerateObserver = null;
+    // Owned DOM, tracked by reference as well as by id: a detached #send_form
+    // (and everything inside it) cannot be reached by document lookups, but
+    // must still be torn down when the shortcut is turned off.
+    let quickGenerateButton = null;
+    let quickGenerateRow = null;
+    let quickGenerateMarkedHost = null;
+
+    function quickGenerateWanted() {
+        const settings = getSettings();
+        return !!settings.enabled && !!settings.showQuickGenerateButton;
+    }
+
+    function createQuickGenerateButton() {
+        const $button = $('<button></button>')
+            .attr('type', 'button')
+            .attr('id', QUICK_BUTTON_ID)
+            .addClass('next-choices-quick-generate next-choices-tool interactable')
+            .attr('title', tr('Generate choices'))
+            .attr('aria-label', tr('Generate choices'));
+        $button.append('<i class="fa-solid fa-dice" aria-hidden="true"></i>');
+        // Same entrypoint as the wand menu item: it only generates choices.
+        // Never applies a choice, submits the composer, or saves settings.
+        $button.on('click', () => {
+            // Re-read at click time: the preference or the whole extension may
+            // have been switched off after this button was mounted.
+            if (!quickGenerateWanted()) return;
+            generateChoices('manual');
+        });
+        quickGenerateButton = $button[0];
+        return $button;
+    }
+
+    /**
+     * Puts the shortcut immediately before the first impersonate button in
+     * Guided Generations' regular button row when that row exists, and in an
+     * owned full-width fallback row inside #send_form otherwise. Creates the
+     * button if it is missing and never duplicates it, so it is safe to call
+     * on every relevant DOM mutation.
+     */
+    function syncQuickGenerateButton() {
+        if (!quickGenerateWanted()) return;
+
+        const sendForm = document.getElementById('send_form');
+        if (!sendForm) return; // composer not in the DOM yet; reconcile later
+
+        let $button = $(`#${QUICK_BUTTON_ID}`).first();
+        if ($button.length && quickGenerateButton && !quickGenerateButton.isConnected && $button[0] !== quickGenerateButton) {
+            // Someone cloned an ancestor of the shortcut (or our node was
+            // copied by a template): cloneNode() drops the click handler, so
+            // adopting the surviving node would leave an inert button. Drop it
+            // and let the next lines create a freshly bound one.
+            $button.remove();
+            $button = $();
+        }
+        if (!$button.length) $button = createQuickGenerateButton();
+        const button = $button[0];
+
+        const regularHost = document.getElementById('gg-regular-buttons-container');
+        if (regularHost && sendForm.contains(regularHost)) {
+            const actionHost = document.getElementById('gg-action-button-container');
+            if (actionHost && !actionHost.classList.contains(QUICK_HOST_CLASS)) {
+                actionHost.classList.add(QUICK_HOST_CLASS);
+            }
+            quickGenerateMarkedHost = actionHost;
+
+            // Marked position: the slot left of the person/impersonate
+            // buttons. Other Guided Generations tools keep their own order.
+            // Direct children only: insertBefore() throws NotFoundError for a
+            // node nested deeper under the container, and a nested person
+            // control is not the marked slot anyway.
+            const reference = Array.from(regularHost.children)
+                .find((child) => child.matches(QUICK_IMPERSONATE_SELECTOR)) ?? null;
+            const placed = button.parentElement === regularHost
+                && (reference
+                    ? button.nextElementSibling === reference
+                    : regularHost.firstElementChild === button);
+            if (!placed) {
+                regularHost.insertBefore(button, reference ?? regularHost.firstElementChild);
+            }
+
+            // The fallback row only exists while Guided Generations has no
+            // mount point of its own.
+            detachOwnedRow();
+            return;
+        }
+
+        clearMarkedHost();
+
+        // Reuse our own row while it is still in the document; otherwise fall
+        // back to an id lookup so a row survives an extension reload and is
+        // never duplicated.
+        let row = quickGenerateRow?.isConnected ? quickGenerateRow : null;
+        if (!row) row = document.getElementById(QUICK_ROW_ID);
+        if (!row) {
+            row = document.createElement('div');
+            row.id = QUICK_ROW_ID;
+            const nonQR = document.getElementById('nonQRFormItems');
+            if (nonQR && nonQR.parentElement === sendForm) {
+                sendForm.insertBefore(row, nonQR.nextSibling);
+            } else {
+                sendForm.appendChild(row);
+            }
+        }
+        quickGenerateRow = row;
+        if (button.parentElement !== row) row.appendChild(button);
+    }
+
+    function removeQuickGenerateButton() {
+        // Reference-based teardown first: the shortcut can be sitting inside a
+        // detached composer, where id lookups cannot reach it. Without this a
+        // disable would leave it behind, and re-attaching that subtree would
+        // show a shortcut the preference no longer asks for.
+        quickGenerateButton?.remove();
+        quickGenerateButton = null;
+        detachOwnedRow();
+        clearMarkedHost();
+        // Safety net for a button this module instance did not create.
+        document.getElementById(QUICK_BUTTON_ID)?.remove();
+    }
+
+    /** Removes the owned fallback row, connected or detached. */
+    function detachOwnedRow() {
+        quickGenerateRow?.remove();
+        quickGenerateRow = null;
+        // Safety net for a row this module instance did not create.
+        document.getElementById(QUICK_ROW_ID)?.remove();
+    }
+
+    /** Drops the Guided Generations host marker, connected or detached. */
+    function clearMarkedHost() {
+        quickGenerateMarkedHost?.classList.remove(QUICK_HOST_CLASS);
+        quickGenerateMarkedHost = null;
+        // Safety net for a host marked by an earlier module instance.
+        document.getElementById('gg-action-button-container')?.classList.remove(QUICK_HOST_CLASS);
+    }
+
+    /**
+     * True when this mutation batch can affect the shortcut's home. Focused on
+     * the composer subtree so chat streaming, attribute churn, and typing are
+     * ignored.
+     */
+    function mutationTouchesQuickHosts(record) {
+        if (record.target instanceof Element && record.target.matches(QUICK_WATCH_SELECTOR)) return true;
+        // Nothing under #chat can move the composer, and chat content is the
+        // high-churn case (message blocks and streamed paragraphs are inserted
+        // and removed constantly). Reject the batch before descending: a
+        // removed node has no ancestors left, so this must use the mutation
+        // target rather than the removed subtree.
+        if (record.target instanceof Element && record.target.closest('#chat')) return false;
+        const touches = (node) => node instanceof Element
+            && (node.matches(QUICK_WATCH_SELECTOR) || !!node.querySelector(QUICK_WATCH_SELECTOR));
+        for (const node of record.addedNodes) if (touches(node)) return true;
+        for (const node of record.removedNodes) if (touches(node)) return true;
+        return false;
+    }
+
+    function onComposerMutations(records) {
+        // Re-check now rather than trusting the state at observe time: a batch
+        // queued before the option was turned off must not remount anything.
+        if (!quickGenerateWanted()) {
+            stopQuickGenerateObserver();
+            removeQuickGenerateButton();
+            return;
+        }
+        for (const record of records) {
+            if (mutationTouchesQuickHosts(record)) {
+                syncQuickGenerateButton();
+                return;
+            }
+        }
+    }
+
+    function startQuickGenerateObserver() {
+        if (quickGenerateObserver || typeof MutationObserver !== 'function') return;
+        quickGenerateObserver = new MutationObserver(onComposerMutations);
+        // Guided Generations rebuilds its toolbar with innerHTML = '' and
+        // emits no mount event, so the DOM is the only reliable signal.
+        quickGenerateObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    function stopQuickGenerateObserver() {
+        quickGenerateObserver?.disconnect();
+        quickGenerateObserver = null;
+    }
+
+    /**
+     * Applies the current enabled + showQuickGenerateButton state: manages the
+     * reconciliation observer and adds/removes the owned shortcut DOM.
+     */
+    function updateQuickGenerateButton() {
+        if (!quickGenerateWanted()) {
+            stopQuickGenerateObserver();
+            removeQuickGenerateButton();
+            return;
+        }
+        startQuickGenerateObserver();
+        syncQuickGenerateButton();
+    }
+
+    // =========================================================================
     // Events
     // =========================================================================
 
@@ -740,6 +1060,7 @@
             initSettingsPanel().catch((err) =>
                 console.error(`[${MODULE_NAME}] Settings panel init failed:`, err));
             addWandMenuButton();
+            updateQuickGenerateButton();
             console.log(`[${MODULE_NAME}] Extension loaded.`);
         } catch (err) {
             console.error(`[${MODULE_NAME}] Init failed:`, err);

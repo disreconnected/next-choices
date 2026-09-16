@@ -83,7 +83,7 @@
 .next-choices-toolbar {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
     flex: 0 0 auto;
 }
 
@@ -103,6 +103,24 @@
 .next-choices-tool:hover {
     opacity: 1;
     background-color: var(--white20a, rgba(255, 255, 255, 0.12));
+}
+
+/* Regenerate / Dismiss keep the .next-choices-tool theme but get a full,
+   tappable square target. Scoped so Apply/Reset keep their own sizing. */
+.next-choices-regenerate,
+.next-choices-dismiss {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 40px;
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0;
+    font-size: 20px;
+    line-height: 1;
 }
 
 .next-choices-loading {
@@ -147,7 +165,168 @@
     flex: 0 0 auto;
 }
 
-/* Settings panel */
+/* --- Per-choice editing ------------------------------------------------- */
+
+.next-choices-row {
+    display: flex;
+    /* Center every control against the preview: with flex-start the shorter
+       preview is pinned to the top and the taller Edit control's center sits
+       below it. */
+    align-items: center;
+    gap: 5px;
+    width: 100%;
+    min-width: 0;
+}
+
+.next-choices-row .next-choices-item {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+/* Sits vertically centered against the choice preview, which keeps its own
+   text size: the control grows instead of the text shrinking. */
+.next-choices-edit {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    align-self: center;
+    min-width: 64px;
+    min-height: 40px;
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: var(--mainFontSize, 15px);
+    line-height: 1.2;
+    text-align: center;
+}
+
+.next-choices-editor {
+    flex: 1 1 100%;
+    min-width: 0;
+}
+
+.next-choices-edit-input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 6em;
+    resize: vertical;
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+}
+
+.next-choices-edit-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+/* Accent variants for the editor controls: muted confirm (green) and
+   discard (red) tints. Tinted borders/backgrounds with colored text keep
+   them legible on dark themes without shouting against SillyTavern's UI. */
+.next-choices-apply {
+    border-color: rgba(95, 158, 110, 0.55);
+    background-color: rgba(95, 158, 110, 0.16);
+    color: #7fbf8a;
+    opacity: 1;
+}
+
+.next-choices-apply:hover {
+    border-color: rgba(95, 158, 110, 0.85);
+    background-color: rgba(95, 158, 110, 0.3);
+    opacity: 1;
+}
+
+.next-choices-reset {
+    border-color: rgba(186, 108, 108, 0.55);
+    background-color: rgba(186, 108, 108, 0.16);
+    color: #d99292;
+    opacity: 1;
+}
+
+.next-choices-reset:hover {
+    border-color: rgba(186, 108, 108, 0.85);
+    background-color: rgba(186, 108, 108, 0.3);
+    opacity: 1;
+}
+
+/* Reuse .next-choices-tool for theme/border/color; add focus and disabled
+   states scoped to the new controls so hover-only visibility is never the
+   only affordance. */
+.next-choices-regenerate:focus-visible,
+.next-choices-dismiss:focus-visible,
+.next-choices-quick-generate:focus-visible,
+.next-choices-edit:focus-visible,
+.next-choices-apply:focus-visible,
+.next-choices-reset:focus-visible {
+    opacity: 1;
+    outline: 2px solid var(--SmartThemeQuoteColor, var(--SmartThemeBodyColor, #eee));
+    outline-offset: 1px;
+}
+
+.next-choices-apply:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* --- Composer quick-generate shortcut ------------------------------------ */
+
+/* Opt-in shortcut for the message-box toolbar. Reuses the .next-choices-tool
+   theme (border/background/body color, hover) but stays fully opaque and gets
+   a full 40px target, matching the enlarged list controls. */
+.next-choices-quick-generate {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 40px;
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+    margin: 0;
+    padding: 8px;
+    font-size: 18px;
+    line-height: 1;
+    opacity: 1;
+}
+
+/* Fallback row: only used while Guided Generations has no toolbar of its own.
+   A full-width row inside #send_form matches #nonQRFormItems instead of
+   squeezing into the narrow #rightSendForm column on mobile. */
+#next_choices_quick_actions {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    width: 100%;
+    flex-basis: 100%;
+    min-width: 0;
+    order: 26;
+    padding: 5px;
+}
+
+/* While the shortcut lives inside Guided Generations' toolbar, let that
+   toolbar wrap rather than pushing horizontal overflow. */
+#gg-action-button-container.next-choices-quick-host {
+    flex-wrap: wrap;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+#gg-action-button-container.next-choices-quick-host > #gg-regular-buttons-container {
+    flex-wrap: wrap;
+    flex-shrink: 1;
+    min-width: 0;
+    max-width: 100%;
+    justify-content: flex-end;
+}
+
+/* --- Settings panel ------------------------------------------------------ */
 
 .next-choices-settings-row {
     display: flex;
@@ -194,6 +373,17 @@
 
     .next-choices-item {
         padding: 10px 12px;
+        min-height: 40px;
+    }
+
+    /* Keep editor controls comfortably tappable; the list stays full-width. */
+    .next-choices-list {
+        width: 100%;
+    }
+
+    .next-choices-edit,
+    .next-choices-apply,
+    .next-choices-reset {
         min-height: 40px;
     }
 }

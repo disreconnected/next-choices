@@ -2,6 +2,7 @@
     "Enable extension": "啟用擴充功能",
     "Auto-generate (create choices after each AI reply. You can always trigger manually from the wand menu)": "自動生成（AI 回覆後自動產生選項；也可隨時從魔杖選單手動生成）",
     "Send on click (by default the choice is inserted into the input box for editing)": "點選後直接送出（預設為填入輸入框可編輯）",
+    "Show Generate choices button beside the message box": "在訊息輸入框旁顯示生成選項按鈕",
     "Generation source": "生成來源",
     "This SillyTavern version does not support Connection Profile requests. Only 'Current connection settings' can be used.": "目前的 SillyTavern 版本不支援 Connection Profile 請求，僅能使用「目前連線設定」。",
     "Number of choices": "選項數量",
@@ -26,5 +27,9 @@
     "generateRaw is not available": "generateRaw 不可用",
     "generateRaw returned an unrecognized response": "generateRaw 回傳了無法解讀的結果",
     "Could not parse choices from the model response": "無法從模型回覆中解析出選項",
-    "Failed to load the Next Choices settings panel.": "Next Choices 設定面板載入失敗。"
+    "Failed to load the Next Choices settings panel.": "Next Choices 設定面板載入失敗。",
+    "Edit": "編輯",
+    "Edit choice": "編輯選項",
+    "Apply changes": "套用變更",
+    "Reset changes": "重設變更"
 }
