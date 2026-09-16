@@ -386,6 +386,7 @@
     outline-offset: 1px;
 }
 
+.next-choices-apply:disabled,
 .next-choices-enhance:disabled,
 .next-choices-guidance-submit:disabled,
 .next-choices-guidance-close:disabled {

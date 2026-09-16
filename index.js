@@ -592,7 +592,7 @@
         // --- Guidance panel (hidden until the Enhance toolbar button) ---
         const $panel = $('<div class="next-choices-guidance" id="next_choices_guidance_panel"></div>').hide();
         const $panelLabel = $('<label for="next_choices_guidance_input"></label>').text(tr('Enhancement prompt'));
-        const $guidanceInput = $('<textarea id="next_choices_guidance_input" class="text_pole next-choices-guidance-input" rows="3" placeholder="e.g. reassure her"></textarea>');
+        const $guidanceInput = $('<textarea id="next_choices_guidance_input" class="text_pole next-choices-guidance-input" rows="3"></textarea>');
         const $panelHint = $('<div class="next-choices-guidance-hint"></div>')
             .text(tr("Keeps each choice's main content and adds your direction."));
         // Same keydown policy as the row editors: Enter stays a native
@@ -605,6 +605,16 @@
 
         const $submit = $('<button type="button" class="next-choices-tool next-choices-guidance-submit"></button>')
             .text(tr('Enhance choices'));
+
+        // Localize the base exemplars first, then splice the persona name into
+        // the translated template so host dictionaries only ever see stable keys.
+        function placeholderExemplars() {
+            const ctx = getContext();
+            const name = (ctx?.name1 || '').trim();
+            if (!name) return tr('e.g. reassure her');
+            return tr('e.g. have {name} reassure her').replaceAll('{name}', name);
+        }
+
         const $panelClose = $('<button type="button" class="next-choices-tool next-choices-guidance-close"></button>')
             .text(tr('Close'));
 
@@ -631,6 +641,9 @@
         const setPanelOpen = (open) => {
             if (open) {
                 $panel.show();
+                // Persona can change between openings; refresh the exemplar
+                // each time so it stays current and localized.
+                $guidanceInput.attr('placeholder', placeholderExemplars());
                 toolbar.$enhance.attr('aria-expanded', 'true');
                 $guidanceInput.trigger('focus');
             } else {
@@ -743,6 +756,11 @@
         const $panelActions = $('<div class="next-choices-guidance-actions"></div>');
         $panelActions.append($submit, $panelClose);
         $panel.append($panelLabel, $guidanceInput, $panelHint, $panelActions, $status);
+
+        // Initial availability pass: without it a freshly rendered panel would
+        // open with submit enabled even though the draft is empty (the input
+        // handler only fires after the user types).
+        refreshGuidanceAvailability();
 
         const $content = $('<div class="next-choices-content"></div>');
         $content.append($list, $panel);
