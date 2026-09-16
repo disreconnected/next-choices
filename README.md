@@ -1,3 +1,40 @@
+# Next Choices (fork)
+
+Fork of [pdatone/next-choices](https://github.com/pdatone/next-choices) with the enhancements listed
+below. The upstream README is reproduced unchanged at the bottom of this file.
+
+## Enhancements on this fork
+
+### Larger, centered choice controls
+- ♻️ **Regenerate** and ✖ **Dismiss** are now 40×40 tappable targets (themed border/background preserved, translated `aria-label`s added), with a 6px gap between them.
+- **Edit** is now a 64×40 button with vertically centered content, and each row centers its controls against the choice text — so Edit lines up with the middle of single-line, multi-paragraph and long unbroken choices alike (measured center-Y delta ≤ 0.01px).
+- Choice text size, padding, markdown formatting and lack of truncation are unchanged: the larger controls take preview width instead of the text shrinking.
+
+### Optional composer "Generate choices" button
+- New opt-in setting **Show Generate choices button beside the message box** (`showQuickGenerateButton`, default **Off**).
+- When enabled, a 🎲 button appears in the Guided Generations composer toolbar, immediately before the person/impersonate buttons (first in the group when no person buttons are enabled). Without Guided Generations it falls back to a full-width row inside the message box, never the narrow mobile column.
+- The button survives Guided Generations rebuilding its toolbar (`innerHTML = ''`) and re-mounts after the composer is re-rendered.
+- It only triggers generation: activating it never selects a choice, fills or submits the composer, or writes settings. Turning the option (or the extension) off removes the button and keeps the preference.
+
+### Settings added by this fork
+| Setting | Default | Description |
+| --- | --- | --- |
+| Show Generate choices button beside the message box | Off | Shows the 🎲 generate button in the composer toolbar (see above). Display-only: it never clears choices or changes auto-generation. |
+| 生成選項按鈕 | 關 | 在輸入框工具列顯示「🎲 生成選項」按鈕（位於人物／扮演按鈕左側），不必開啟魔杖選單即可生成選項。純粹是顯示開關：不會更動選項列或自動生成設定。 |
+
+The Chinese half reproduced below is the upstream README, so its settings table lists upstream settings only; this fork's addition is the translated row above.
+
+### Usage additions
+- The choice row's ♻️ regenerates and ✖ dismisses the choices as before, now with larger targets alongside a centered **Edit** per choice.
+- With the composer button enabled, clicking 🎲 in the toolbar generates a fresh set of choices at any time, without opening the wand menu.
+
+### Version
+- This fork's manifest is at **0.3.0**.
+
+---
+
+# Original README (upstream, unchanged)
+
 # Next Choices
 
 A third-party UI extension for SillyTavern. After each AI character reply, it generates 3 suggested player responses based on the recent conversation and shows them as a button row above the input area. Clicking a choice fills it into the input box so you can edit before sending.
@@ -42,7 +79,6 @@ Expand "Next Choices" in the Extensions panel:
 | Enable extension | On | Master switch. |
 | Auto-generate | On | Generate choices automatically after each AI reply; when off, a "🎲 Generate choices" button appears above the input box for manual triggering. |
 | Send on click | Off | When on, clicking a choice sends it immediately; by default it is only inserted into the input box for editing. |
-| Generate choices button | Off | Show a "🎲 Generate choices" button in the composer toolbar, immediately before the person/impersonate buttons, so choices can be generated without opening the wand menu. Purely a display toggle: it never changes the choices list or auto-generation. |
 | Generation source | Current connection settings | Generate choices with your current API connection or any saved Connection Profile. |
 | Number of choices | 3 | How many choices to generate each time. |
 | Max tokens | 500 | Token limit for the generation request. |
@@ -122,7 +158,6 @@ SillyTavern 第三方 UI 擴充功能：在每次 AI 角色回覆完成後，依
 | 啟用擴充功能 | 開 | 總開關。 |
 | 自動生成 | 開 | AI 回覆後自動產生選項；關閉後輸入框上方會出現「🎲 生成選項」按鈕改為手動觸發。 |
 | 點選後直接送出 | 關 | 開啟後點選項會立即送出；預設僅填入輸入框供編輯。 |
-| 生成選項按鈕 | 關 | 在輸入框工具列顯示「🎲 生成選項」按鈕（位於人物／扮演按鈕左側），不必開啟魔杖選單即可生成選項。純粹是顯示開關：不會更動選項列或自動生成設定。 |
 | 生成來源 | 目前連線設定 | 選擇用目前的 API 連線，或任一已儲存的 Connection Profile 來生成選項。 |
 | 選項數量 | 3 | 每次生成幾個選項。 |
 | 最大 Token 數 | 500 | 生成請求的 token 上限。 |
