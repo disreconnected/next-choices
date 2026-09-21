@@ -2,7 +2,7 @@
     "Enable extension": "啟用擴充功能",
     "Auto-generate (create choices after each AI reply. You can always trigger manually from the wand menu)": "自動生成（AI 回覆後自動產生選項；也可隨時從魔杖選單手動生成）",
     "Send on click (by default the choice is inserted into the input box for editing)": "點選後直接送出（預設為填入輸入框可編輯）",
-    "Show Generate choices button beside the message box": "在訊息輸入框旁顯示生成選項按鈕",
+    "Show choice generation buttons beside the message box": "在訊息輸入框旁顯示生成選項按鈕",
     "Generation source": "生成來源",
     "This SillyTavern version does not support Connection Profile requests. Only 'Current connection settings' can be used.": "目前的 SillyTavern 版本不支援 Connection Profile 請求，僅能使用「目前連線設定」。",
     "Number of choices": "選項數量",
@@ -43,5 +43,10 @@
     "Failed to enhance choices: ": "增強選項失敗：",
     "Could not parse one enhanced choice for every original choice. Try again.": "無法為每個原始選項解析出一個增強後的選項，請再試一次。",
     "e.g. reassure her": "例如：安慰她",
-    "e.g. have {name} reassure her": "例如：讓 {name} 安慰她"
+    "e.g. have {name} reassure her": "例如：讓 {name} 安慰她",
+    "Generate choices (guided)": "生成選項（引導式）",
+    "Choice theme": "選項主題",
+    "e.g. invite her to dance": "例如：邀她跳舞",
+    "Use one main theme while keeping each choice's tone and approach from your prompt template.": "使用單一主要主題，同時保留 prompt 模板中每個選項的語氣與走向。",
+    "No conversation is available to generate choices.": "沒有可用於生成選項的對話。"
 }

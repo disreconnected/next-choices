@@ -208,6 +208,35 @@
         return base + '\n\n=== Next Choices enhancement task ===\n' + payload + '\n=== End of Next Choices enhancement task ===';
     }
 
+    /**
+     * Builds a prompt that asks the model for brand-new options that all share
+     * the player's one main theme, while the (possibly customized) template
+     * keeps supplying the diversity of tones, motivations, and approaches.
+     * Deliberately not an enhancement: buildEnhancementPrompt rewrites the
+     * options already on screen, this one replaces them.
+     * Reuses buildPrompt (persona, history, custom template, native macros)
+     * and appends the task as literal data AFTER macro expansion, so theme text
+     * can never be treated as prompt markup or leak through substituteParams.
+     */
+    function buildGuidedPrompt(ctx, settings, guidance) {
+        const base = buildPrompt(ctx, settings);
+        const payload = JSON.stringify(
+            {
+                task: 'Generate new response options around the shared theme below.',
+                guidance,
+                requirements: [
+                    'Make the guidance the main theme of every option, while staying consistent with the conversation and persona.',
+                    "Preserve the prompt template's different tones, motivations, approaches, and consequences across the options (for example, bold, cautious, romantic, or creative). The shared theme must not make the options paraphrases of one another.",
+                    'Keep the language, voice, and other requirements of the prompt template.',
+                    'Return ONLY a JSON array of exactly ' + settings.numChoices + ' nonempty strings, with no commentary.',
+                ],
+            },
+            null,
+            2,
+        );
+        return base + '\n\n=== Next Choices guided generation ===\n' + payload + '\n=== End of Next Choices guided generation ===';
+    }
+
     // =========================================================================
     // Generation
     // =========================================================================
@@ -223,6 +252,10 @@
             abortController?.abort();
         } catch { /* ignore */ }
         abortController = null;
+        // The composer editor's submit control is locked only for the duration
+        // of its own request, so anything that abandons a pending request
+        // (newer request, chat change, settings toggle) must unlock it here.
+        setGenerationGuidanceBusy(false);
     }
 
     /**
@@ -261,45 +294,67 @@
         }
     }
 
-    async function generateChoices(reason = 'manual') {
+    async function generateChoices(reason = 'manual', guidance = '') {
         const ctx = getContext();
-        const settings = getSettings();
+        // Snapshot before the first await: a preference changed while the
+        // request is in flight must not change this request's prompt or the
+        // number of choices this response is validated against.
+        const settings = { ...getSettings() };
         if (!ctx || !settings.enabled) return;
         if (reason === 'auto' && !settings.autoGenerate) return;
+
+        // Only the guided reason consumes the submitted theme. The dice, wand,
+        // Retry, and auto callbacks are unguided by construction and send the
+        // plain template prompt even when the theme box holds text.
+        const guided = reason === 'guided';
+        const theme = guided ? String(guidance ?? '').trim() : '';
+        if (guided && !theme) return; // empty theme: no request
 
         const lastMes = getLastMessage(ctx);
         if (!lastMes) return;
         // In auto mode, only fire when the latest message is from the AI.
         if (reason === 'auto' && lastMes.is_user) return;
 
+        // A pending auto-generation would otherwise fire mid-request and abort
+        // the guided request it was submitted from.
+        if (guided) clearTimeout(autoGenerateTimer);
+
         abortPending();
         const myRequestId = requestId;
         abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
         generating = true;
 
+        if (guided) setGenerationGuidanceBusy(true);
         renderLoading();
 
         let text;
         try {
-            const prompt = buildPrompt(ctx, settings);
+            const prompt = guided ? buildGuidedPrompt(ctx, settings, theme) : buildPrompt(ctx, settings);
             text = await sendRawRequest(ctx, settings, prompt);
         } catch (err) {
             if (myRequestId !== requestId) return; // stale, ignore
             generating = false;
+            if (guided) setGenerationGuidanceBusy(false);
             console.error(`[${MODULE_NAME}] Generation failed:`, err);
-            renderError(err?.message ?? String(err));
+            renderError(err?.message ?? String(err), theme);
             return;
         }
 
         if (myRequestId !== requestId) return; // stale, ignore
         generating = false;
+        if (guided) setGenerationGuidanceBusy(false);
 
         const choices = parseChoices(text, settings.numChoices);
         if (!choices.length) {
-            renderError(tr('Could not parse choices from the model response'));
+            renderError(tr('Could not parse choices from the model response'), theme);
             return;
         }
-        renderChoices(choices);
+        renderChoices(choices, theme);
+        // Success collapses the editor; the theme stays in the textarea so it
+        // can be reopened and reused within the same conversation turn. Only an
+        // editor that is actually open is collapsed, so this never recreates
+        // UI that a reset has already discarded.
+        if (guided && generationGuidanceUi?.open) setGenerationGuidanceOpen(false);
     }
 
     // =========================================================================
@@ -401,13 +456,16 @@
         $container.empty().hide();
     }
 
-    function makeToolbar(onEnhance = null) {
+    function makeToolbar(onEnhance = null, generationGuidance = '') {
         const $toolbar = $('<div class="next-choices-toolbar"></div>');
         const $regen = $('<button type="button" class="next-choices-tool next-choices-regenerate"></button>')
             .text('♻️')
             .attr('title', tr('Regenerate'))
             .attr('aria-label', tr('Regenerate'));
-        $regen.on('click', () => generateChoices('manual'));
+        // Regenerate repeats THIS render: a guided result regenerates from the
+        // theme captured when it was rendered, not from whatever the composer
+        // theme box holds now.
+        $regen.on('click', () => generateChoices(generationGuidance ? 'guided' : 'manual', generationGuidance));
 
         let $enhance = $();
         if (typeof onEnhance === 'function') {
@@ -439,16 +497,18 @@
         $container.append($loading);
     }
 
-    function renderError(message) {
+    function renderError(message, generationGuidance = '') {
         const $container = getContainer();
         if (!$container.length) return;
         $container.empty().show();
         const $error = $('<div class="next-choices-error"></div>');
         $error.append($('<span></span>').text(tr('Failed to generate choices: ') + message));
         const $retry = $('<button type="button" class="next-choices-retry menu_button"></button>').text(tr('Retry'));
-        $retry.on('click', () => generateChoices('manual'));
+        // Retry resubmits the failed request, so it uses the same captured
+        // theme as the render it belongs to rather than the live draft.
+        $retry.on('click', () => generateChoices(generationGuidance ? 'guided' : 'manual', generationGuidance));
         $error.append($retry);
-        $container.append($error, makeToolbar().$toolbar);
+        $container.append($error, makeToolbar(null, generationGuidance).$toolbar);
     }
 
     /**
@@ -473,7 +533,7 @@
         }
     }
 
-    function renderChoices(choices) {
+    function renderChoices(choices, generationGuidance = '') {
         const $container = getContainer();
         if (!$container.length) return;
         // Shared committed text: preview, selection, editor init, Apply, and
@@ -583,11 +643,12 @@
         });
 
         // The toolbar's Enhance button exists only because a toggle callback
-        // is supplied here; renderError passes none and gets no button.
+        // is supplied here; renderError passes none and gets no button. The
+        // generation theme is forwarded so Regenerate repeats this render.
         const toolbar = makeToolbar(() => {
             if (enhancementBusy) return;
             setPanelOpen(!$panelWrap.is(':visible'));
-        });
+        }, generationGuidance);
 
         // --- Guidance panel (hidden until the Enhance toolbar button) ---
         // The wrap is the disclosure unit: it carries the live status as a
@@ -755,7 +816,9 @@
             // Success: one atomic replace. The new render owns fresh state;
             // its panel starts hidden with an empty draft, and the next
             // enhancement uses the enhanced text as its committed baseline.
-            renderChoices(enhanced);
+            // The captured generation theme is forwarded: the enhancement
+            // direction is not the theme these options were generated from.
+            renderChoices(enhanced, generationGuidance);
             const $newEnhance = $(`#${CONTAINER_ID} .next-choices-enhance`).first();
             if ($newEnhance.length) $newEnhance.trigger('focus');
         };
@@ -890,11 +953,9 @@
             clearTimeout(autoGenerateTimer);
             abortPending();
             clearChoicesUI();
-            if (enabled) {
-                $('#next_choices_wand_button').show();
-            } else {
-                $('#next_choices_wand_button').hide();
-            }
+            // Both wand entries follow the enabled state; the composer
+            // shortcuts are additionally gated by their own preference.
+            $(`#${WAND_BUTTON_ID}, #${GUIDED_WAND_BUTTON_ID}`).toggle(enabled);
             updateQuickGenerateButton();
         });
         $('#next_choices_auto_generate').on('change', function () {
@@ -1004,39 +1065,76 @@
     // =========================================================================
 
     /**
-     * Adds a "Generate Choices" entry to SillyTavern's wand (magic wand) menu,
-     * so the player can trigger generation manually at any time. Idempotent.
+     * Adds one entry to SillyTavern's wand (magic wand) menu, creating it once
+     * and toggling its visibility afterwards. Idempotent per id, so a missing
+     * or removed sibling entry never blocks the other one. `onClick` receives
+     * the entry element, which launchers that open a panel reuse as the focus
+     * return target.
+     */
+    function addWandMenuItem({ id, icon, label, onClick, visible, controls = null }) {
+        let $item = $(`#${id}`).first();
+        if (!$item.length) {
+            let $menu = $('#extensionsMenu');
+            if (!$menu.length) $menu = $('#extensions_menu');
+            if (!$menu.length) {
+                console.warn(`[${MODULE_NAME}] Wand menu container not found; ${id} not added.`);
+                return null;
+            }
+            $item = $(`<div id="${id}" class="list-group-item flex-container flexGap5 interactable" tabindex="0"></div>`);
+            $item.append(`<div class="fa-solid ${icon} extensionsMenuExtensionButton"></div>`);
+            $item.append($('<span></span>').text(label));
+            $item.on('click', () => onClick($item[0]));
+            $menu.append($item);
+        }
+        if (controls) {
+            $item.attr('aria-controls', controls);
+            if (typeof $item.attr('aria-expanded') === 'undefined') $item.attr('aria-expanded', 'false');
+        }
+        $item.toggle(!!visible);
+        return $item;
+    }
+
+    /**
+     * Adds the wand (magic wand) menu entries: plain generation and guided
+     * generation (which only opens the theme editor). Both stay available
+     * whenever the extension is enabled, independently of whether the composer
+     * shortcuts are shown, so guided generation is never unreachable.
      */
     function addWandMenuButton() {
-        if ($('#next_choices_wand_button').length) return;
-
-        let $menu = $('#extensionsMenu');
-        if (!$menu.length) $menu = $('#extensions_menu');
-        if (!$menu.length) {
-            console.warn(`[${MODULE_NAME}] Wand menu container not found; button not added.`);
-            return;
-        }
-
-        const $item = $('<div id="next_choices_wand_button" class="list-group-item flex-container flexGap5 interactable" tabindex="0"></div>');
-        $item.append('<div class="fa-solid fa-dice extensionsMenuExtensionButton"></div>');
-        $item.append($('<span></span>').text(tr('Generate Choices')));
-        $item.on('click', () => generateChoices('manual'));
-        $menu.append($item);
-
-        if (getSettings().enabled) {
-            $item.show();
-        } else {
-            $item.hide();
-        }
+        const enabled = !!getSettings().enabled;
+        addWandMenuItem({
+            id: WAND_BUTTON_ID,
+            icon: 'fa-dice',
+            label: tr('Generate Choices'),
+            onClick: () => generateChoices('manual'),
+            visible: enabled,
+        });
+        addWandMenuItem({
+            id: GUIDED_WAND_BUTTON_ID,
+            icon: 'fa-compass',
+            label: tr('Generate choices (guided)'),
+            // Only opens the editor; the request is issued by its submit button.
+            onClick: (opener) => setGenerationGuidanceOpen(!generationGuidanceUi?.open, opener),
+            visible: enabled,
+            controls: GUIDANCE_WRAPPER_ID,
+        });
+        // A recreated wand entry loses its aria state with the old node.
+        syncGenerationGuidanceAria();
     }
 
     // =========================================================================
     // UI: composer quick-generate shortcut
     // =========================================================================
 
+    const WAND_BUTTON_ID = 'next_choices_wand_button';
     const QUICK_BUTTON_ID = 'next_choices_quick_generate';
     const QUICK_ROW_ID = 'next_choices_quick_actions';
     const QUICK_HOST_CLASS = 'next-choices-quick-host';
+    const GUIDED_BUTTON_ID = 'next_choices_guided_generate';
+    const GUIDED_WAND_BUTTON_ID = 'next_choices_guided_wand_button';
+    const GUIDANCE_WRAPPER_ID = 'next_choices_generation_guidance';
+    const GUIDANCE_PANEL_ID = 'next_choices_generation_guidance_panel';
+    const GUIDANCE_INPUT_ID = 'next_choices_theme_input';
     const QUICK_IMPERSONATE_SELECTOR =
         '#gg_impersonate_button, #gg_impersonate_button_2nd, #gg_impersonate_button_3rd';
     const QUICK_WATCH_SELECTOR = [
@@ -1046,6 +1144,8 @@
         '#gg-regular-buttons-container',
         `#${QUICK_ROW_ID}`,
         `#${QUICK_BUTTON_ID}`,
+        `#${GUIDED_BUTTON_ID}`,
+        `#${GUIDANCE_WRAPPER_ID}`,
     ].join(', ');
 
     let quickGenerateObserver = null;
@@ -1053,8 +1153,248 @@
     // (and everything inside it) cannot be reached by document lookups, but
     // must still be torn down when the shortcut is turned off.
     let quickGenerateButton = null;
+    let guidedGenerateButton = null;
     let quickGenerateRow = null;
     let quickGenerateMarkedHost = null;
+
+    // =========================================================================
+    // UI: composer theme editor (guided generation)
+    // =========================================================================
+
+    // Owned editor DOM plus its launch state. The textarea owns the draft; the
+    // panel is only ever shown or hidden with it, and resetGenerationGuidanceUI
+    // discards the whole tree. Deliberately separate from
+    // #next_choices_container, so loading, errors, enhancement, and choice
+    // rendering never erase the draft. The draft is never persisted to
+    // settings, chat metadata, browser storage, or chat messages.
+    let generationGuidanceUi = null;
+
+    /** True when a node is in the document and takes up space. */
+    function isRendered(node) {
+        return node instanceof HTMLElement && node.isConnected && node.getClientRects().length > 0;
+    }
+
+    /**
+     * Keeps aria-expanded on both guided launchers in sync with the editor.
+     * Writes to the owned node directly: a button that was just recreated is
+     * still detached, where an id lookup cannot see it, and it would otherwise
+     * keep advertising a closed editor while the panel is open. Also used
+     * right after a launcher is (re)created, which loses its state with the
+     * old node.
+     */
+    function syncGenerationGuidanceAria() {
+        const open = generationGuidanceUi?.open ? 'true' : 'false';
+        guidedGenerateButton?.setAttribute('aria-expanded', open);
+        document.getElementById(GUIDED_WAND_BUTTON_ID)?.setAttribute('aria-expanded', open);
+    }
+
+    /** Submit needs a nonempty theme and no pending guided request. */
+    function refreshGuidanceSubmitState() {
+        const ui = generationGuidanceUi;
+        if (!ui) return;
+        const hasTheme = String(ui.$input.val() ?? '').trim().length > 0;
+        ui.$submit.prop('disabled', ui.busy || !hasTheme);
+    }
+
+    function createGenerationGuidanceUI() {
+        const $wrapper = $(`<div id="${GUIDANCE_WRAPPER_ID}" class="next-choices-guidance-wrap"></div>`).hide();
+        const $panel = $(`<div class="next-choices-guidance" id="${GUIDANCE_PANEL_ID}"></div>`);
+        const $label = $(`<label for="${GUIDANCE_INPUT_ID}"></label>`).text(tr('Choice theme'));
+        const $input = $(`<textarea id="${GUIDANCE_INPUT_ID}" class="text_pole next-choices-guidance-input" rows="3"></textarea>`)
+            .attr('placeholder', tr('e.g. invite her to dance'));
+        const $hint = $('<div class="next-choices-guidance-hint"></div>')
+            .text(tr("Use one main theme while keeping each choice's tone and approach from your prompt template."));
+        const $actions = $('<div class="next-choices-guidance-actions"></div>');
+        const $submit = $('<button type="button" class="next-choices-tool next-choices-guidance-submit"></button>')
+            .text(tr('Generate choices (guided)'));
+        const $close = $('<button type="button" class="next-choices-tool next-choices-guidance-close"></button>')
+            .text(tr('Close'));
+        // The live status stays OUTSIDE the panel: aria-busy on an ancestor
+        // makes assistive tech defer live-region updates inside it, so the
+        // pending announcement would never be spoken.
+        const $status = $('<div class="next-choices-guidance-status" role="status" aria-live="polite"></div>');
+
+        $actions.append($submit, $close);
+        $panel.append($label, $input, $hint, $actions);
+        $wrapper.append($panel, $status);
+
+        // Same keydown policy as the row editors and the enhancement panel:
+        // Enter stays a native newline, and the global .interactable Enter
+        // handler never sees this textarea. Submission is explicit, and the
+        // main composer is never written to or submitted from here.
+        $input.on('keydown', (event) => event.stopPropagation());
+        $input.on('input', refreshGuidanceSubmitState);
+
+        const ui = {
+            $wrapper,
+            $panel,
+            $input,
+            $submit,
+            $close,
+            $status,
+            open: false,
+            busy: false,
+            // Element that opened the editor, so focus can return to it.
+            opener: null,
+        };
+
+        $submit.on('click', () => {
+            if (ui !== generationGuidanceUi || ui.busy) return;
+            const theme = String($input.val() ?? '').trim();
+            if (!theme) return;
+            const ctx = getContext();
+            if (!ctx || !getLastMessage(ctx)) {
+                // Keep the draft; only report. No request is issued.
+                ui.$status.text(tr('No conversation is available to generate choices.'));
+                return;
+            }
+            generateChoices('guided', theme);
+        });
+        $close.on('click', () => setGenerationGuidanceOpen(false));
+
+        return ui;
+    }
+
+    /**
+     * Lazily creates the editor and returns it, then reconciles its host. The
+     * DOM is created even before a composer exists so a draft is retained for
+     * later reconciliation; it is simply not reachable until it is mounted.
+     */
+    function getGenerationGuidanceUI() {
+        if (!generationGuidanceUi) {
+            generationGuidanceUi = createGenerationGuidanceUI();
+            // The editor outlives the composer shortcut preference (the wand
+            // entry can open it while no shortcut is shown), so its own host
+            // must be reconciled from the moment it exists. Without this the
+            // reconciler would only run again on the next settings toggle, and
+            // a composer rebuild would leave the editor detached with its
+            // draft until then.
+            if (getSettings().enabled) startQuickGenerateObserver();
+        }
+        syncGenerationGuidanceUI();
+        return generationGuidanceUi;
+    }
+
+    /**
+     * Moves the existing editor (never creates one) to the current composer
+     * host and copies that host's flex order, so the editor renders above the
+     * toolbar rather than merely before it in the DOM.
+     *
+     * Priority host: the first of these that is a direct child of #send_form.
+     * Guided Generations' container is destructively rebuilt, so the editor is
+     * a sibling of it, never a descendant, and never inside .interactable.
+     */
+    function syncGenerationGuidanceUI() {
+        const ui = generationGuidanceUi;
+        if (!ui) return;
+
+        const sendForm = document.getElementById('send_form');
+        if (!sendForm) return; // no composer: keep the draft for later
+
+        const wrapper = ui.$wrapper[0];
+        // A composer replacement can leave a cloned duplicate wrapper behind.
+        // CloneNode drops bound handlers, so the duplicate is dropped instead
+        // of adopted, and our own node (with the draft) is moved back.
+        const duplicate = document.getElementById(GUIDANCE_WRAPPER_ID);
+        if (duplicate && duplicate !== wrapper) duplicate.remove();
+
+        let host = null;
+        for (const id of ['gg-action-button-container', QUICK_ROW_ID, 'nonQRFormItems']) {
+            const candidate = document.getElementById(id);
+            if (candidate && candidate.parentElement === sendForm) {
+                host = candidate;
+                break;
+            }
+        }
+
+        const placed = wrapper.parentElement === sendForm && wrapper.nextElementSibling === host;
+        if (!placed) {
+            if (host) sendForm.insertBefore(wrapper, host);
+            else sendForm.appendChild(wrapper);
+        }
+
+        // Fallback order matches #nonQRFormItems' row so an unmounted host
+        // still yields a full-width editor above the composer rows.
+        const order = host ? getComputedStyle(host).order : '25';
+        if (wrapper.style.order !== order) wrapper.style.order = order;
+    }
+
+    /**
+     * Toggles the editor. Opening focuses the theme box and never issues a
+     * request; closing only hides, so it neither cancels a pending request nor
+     * discards the draft. Returns false when there is no composer to show it in.
+     */
+    function setGenerationGuidanceOpen(open, opener = null) {
+        const ui = getGenerationGuidanceUI();
+        const wrapper = ui.$wrapper[0];
+
+        if (!open) {
+            // Decided before hiding: a hidden element cannot hold focus, so
+            // this must be read while the close control is still visible.
+            const focusInside = wrapper.contains(document.activeElement);
+            ui.$wrapper.hide();
+            ui.open = false;
+            syncGenerationGuidanceAria();
+            if (focusInside) restoreGenerationGuidanceFocus(ui);
+            return true;
+        }
+
+        if (opener instanceof Element) ui.opener = opener;
+        if (!wrapper.isConnected) return false; // composer not mounted yet
+        ui.$wrapper.show();
+        ui.open = true;
+        syncGenerationGuidanceAria();
+        refreshGuidanceSubmitState();
+        ui.$input.trigger('focus');
+        return true;
+    }
+
+    /**
+     * Returns focus to whatever launched the editor, falling back to the
+     * visible composer shortcut and then the message box.
+     */
+    function restoreGenerationGuidanceFocus(ui) {
+        const candidates = [ui.opener, document.getElementById(GUIDED_BUTTON_ID), document.getElementById('send_textarea')];
+        for (const candidate of candidates) {
+            if (isRendered(candidate)) {
+                candidate.focus();
+                return;
+            }
+        }
+    }
+
+    /**
+     * Locks the editor for the duration of its own guided request. Released on
+     * that request's terminal path only, and unconditionally by abortPending()
+     * so any interruption cannot leave the submit control stuck.
+     */
+    function setGenerationGuidanceBusy(busy) {
+        const ui = generationGuidanceUi;
+        if (!ui) return;
+        ui.busy = !!busy;
+        ui.$panel.attr('aria-busy', ui.busy ? 'true' : 'false');
+        ui.$input.prop('disabled', ui.busy);
+        ui.$status.text(ui.busy ? tr('Generating choices…') : '');
+        refreshGuidanceSubmitState();
+    }
+
+    /**
+     * Discards the editor and its draft. Used when the conversation turn is
+     * invalidated (chat change, swipe, edit, delete, new generation) and when
+     * the extension is disabled.
+     */
+    function resetGenerationGuidanceUI() {
+        const ui = generationGuidanceUi;
+        generationGuidanceUi = null;
+        if (ui) {
+            ui.$input.val('');
+            ui.$wrapper.remove();
+        } else {
+            // Safety net for a wrapper this module instance did not create.
+            document.getElementById(GUIDANCE_WRAPPER_ID)?.remove();
+        }
+        syncGenerationGuidanceAria();
+    }
 
     function quickGenerateWanted() {
         const settings = getSettings();
@@ -1075,18 +1415,81 @@
             // Re-read at click time: the preference or the whole extension may
             // have been switched off after this button was mounted.
             if (!quickGenerateWanted()) return;
+            // Stays one-click unguided even when the theme box holds text.
             generateChoices('manual');
         });
         quickGenerateButton = $button[0];
         return $button;
     }
 
+    function createGuidedGenerateButton() {
+        const $button = $('<button></button>')
+            .attr('type', 'button')
+            .attr('id', GUIDED_BUTTON_ID)
+            .addClass('next-choices-quick-generate next-choices-tool interactable')
+            .attr('title', tr('Generate choices (guided)'))
+            .attr('aria-label', tr('Generate choices (guided)'))
+            .attr('aria-controls', GUIDANCE_WRAPPER_ID)
+            .attr('aria-expanded', 'false');
+        $button.append('<i class="fa-solid fa-compass" aria-hidden="true"></i>');
+        // Only opens the theme editor; the request is issued by its submit
+        // button, so opening never generates anything.
+        $button.on('click', () => {
+            if (!quickGenerateWanted()) return;
+            setGenerationGuidanceOpen(!generationGuidanceUi?.open, $button[0]);
+        });
+        guidedGenerateButton = $button[0];
+        syncGenerationGuidanceAria();
+        return $button;
+    }
+
+    // Ids this module instance has already created a bound node for. After
+    // that, another node carrying the same id is never adopted: cloneNode()
+    // copies markup but drops event handlers, and a stale copy sitting in a
+    // subtree that was detached and later restored is equally inert.
+    const ownedShortcutIds = new Set();
+
     /**
-     * Puts the shortcut immediately before the first impersonate button in
-     * Guided Generations' regular button row when that row exists, and in an
-     * owned full-width fallback row inside #send_form otherwise. Creates the
-     * button if it is missing and never duplicates it, so it is safe to call
-     * on every relevant DOM mutation.
+     * Returns a live, bound button for `id`.
+     *
+     * Exactly one node may carry each shortcut id. Our own node is reused even
+     * while it is detached (a composer or toolbar rebuild moves it back with
+     * its handlers and state intact) and any other node with that id is
+     * removed rather than adopted, so a restored subtree cannot resurrect a
+     * second, inert copy of the shortcut.
+     */
+    function resolveOwnedButton(id, owned, create) {
+        if (owned) {
+            for (const node of document.querySelectorAll(`#${id}`)) {
+                if (node !== owned) node.remove();
+            }
+            return $(owned);
+        }
+
+        // No owned node: adopt what the page already has only on first
+        // sighting (for example an extension script loaded twice). After this
+        // module has created a node for the id, a node it does not hold is a
+        // clone (cloneNode drops handlers) or a stale copy from a restored
+        // subtree, so it is removed and replaced instead of adopted. Nothing
+        // removed here may be returned: the NodeList is static and would hand
+        // back a detached, handler-less node for the caller to re-insert.
+        const found = document.querySelectorAll(`#${id}`);
+        if (found.length && !ownedShortcutIds.has(id)) {
+            for (let i = 1; i < found.length; i++) found[i].remove();
+            return $(found[0]);
+        }
+        for (const node of found) node.remove();
+        const $button = create();
+        ownedShortcutIds.add(id);
+        return $button;
+    }
+
+    /**
+     * Puts the ordered pair [dice, compass] immediately before the first
+     * impersonate button in Guided Generations' regular button row when that
+     * row exists, and in an owned full-width fallback row inside #send_form
+     * otherwise. Creates missing buttons and never duplicates them, so it is
+     * safe to call on every relevant DOM mutation.
      */
     function syncQuickGenerateButton() {
         if (!quickGenerateWanted()) return;
@@ -1094,17 +1497,17 @@
         const sendForm = document.getElementById('send_form');
         if (!sendForm) return; // composer not in the DOM yet; reconcile later
 
-        let $button = $(`#${QUICK_BUTTON_ID}`).first();
-        if ($button.length && quickGenerateButton && !quickGenerateButton.isConnected && $button[0] !== quickGenerateButton) {
-            // Someone cloned an ancestor of the shortcut (or our node was
-            // copied by a template): cloneNode() drops the click handler, so
-            // adopting the surviving node would leave an inert button. Drop it
-            // and let the next lines create a freshly bound one.
-            $button.remove();
-            $button = $();
-        }
-        if (!$button.length) $button = createQuickGenerateButton();
-        const button = $button[0];
+        const $dice = resolveOwnedButton(QUICK_BUTTON_ID, quickGenerateButton, createQuickGenerateButton);
+        const $compass = resolveOwnedButton(GUIDED_BUTTON_ID, guidedGenerateButton, createGuidedGenerateButton);
+        const dice = $dice[0];
+        const compass = $compass[0];
+        // Hold the live node even when it was adopted rather than created, so
+        // teardown and later reconciles always treat it as ours.
+        quickGenerateButton = dice;
+        guidedGenerateButton = compass;
+        // A button that was just created (or restored from the DOM) carries no
+        // launch state, so both launchers are re-synchronized after placement.
+        syncGenerationGuidanceAria();
 
         const regularHost = document.getElementById('gg-regular-buttons-container');
         if (regularHost && sendForm.contains(regularHost)) {
@@ -1121,17 +1524,25 @@
             // control is not the marked slot anyway.
             const reference = Array.from(regularHost.children)
                 .find((child) => child.matches(QUICK_IMPERSONATE_SELECTOR)) ?? null;
-            const placed = button.parentElement === regularHost
+            // Both adjacency and the trailing reference are checked: keeping
+            // only the old single-button condition would let a foreign node
+            // wedge itself between the pair and reorder it on every mutation.
+            const placed = dice.parentElement === regularHost
+                && dice.nextElementSibling === compass
                 && (reference
-                    ? button.nextElementSibling === reference
-                    : regularHost.firstElementChild === button);
+                    ? compass.nextElementSibling === reference
+                    : regularHost.firstElementChild === dice);
             if (!placed) {
-                regularHost.insertBefore(button, reference ?? regularHost.firstElementChild);
+                // Inserting the compass first keeps the pair's order even when
+                // the dice is currently the container's first child.
+                regularHost.insertBefore(compass, reference ?? regularHost.firstElementChild);
+                regularHost.insertBefore(dice, compass);
             }
 
             // The fallback row only exists while Guided Generations has no
             // mount point of its own.
             detachOwnedRow();
+            syncGenerationGuidanceUI();
             return;
         }
 
@@ -1153,7 +1564,14 @@
             }
         }
         quickGenerateRow = row;
-        if (button.parentElement !== row) row.appendChild(button);
+        // Appending both in order also repairs a pair that the row lost one
+        // half of; the guard keeps an already-correct pair from producing a
+        // mutation record on every batch.
+        if (dice.parentElement !== row || dice.nextElementSibling !== compass) {
+            row.appendChild(dice);
+            row.appendChild(compass);
+        }
+        syncGenerationGuidanceUI();
     }
 
     function removeQuickGenerateButton() {
@@ -1163,10 +1581,16 @@
         // show a shortcut the preference no longer asks for.
         quickGenerateButton?.remove();
         quickGenerateButton = null;
+        guidedGenerateButton?.remove();
+        guidedGenerateButton = null;
         detachOwnedRow();
         clearMarkedHost();
-        // Safety net for a button this module instance did not create.
+        // Safety nets for buttons this module instance did not create.
         document.getElementById(QUICK_BUTTON_ID)?.remove();
+        document.getElementById(GUIDED_BUTTON_ID)?.remove();
+        // The theme editor is deliberately left alone: hiding the composer
+        // shortcuts is a display preference, and the wand entry can still open
+        // (and reconcile) the editor.
     }
 
     /** Removes the owned fallback row, connected or detached. */
@@ -1208,14 +1632,16 @@
     function onComposerMutations(records) {
         // Re-check now rather than trusting the state at observe time: a batch
         // queued before the option was turned off must not remount anything.
-        if (!quickGenerateWanted()) {
-            stopQuickGenerateObserver();
-            removeQuickGenerateButton();
+        // The reconciler owns every branch (disabled, shortcuts hidden but the
+        // editor open, or a moved host), so the observer never decides state on
+        // its own.
+        if (!quickGenerateWanted() && !generationGuidanceUi) {
+            updateQuickGenerateButton();
             return;
         }
         for (const record of records) {
             if (mutationTouchesQuickHosts(record)) {
-                syncQuickGenerateButton();
+                updateQuickGenerateButton();
                 return;
             }
         }
@@ -1239,13 +1665,26 @@
      * reconciliation observer and adds/removes the owned shortcut DOM.
      */
     function updateQuickGenerateButton() {
-        if (!quickGenerateWanted()) {
-            stopQuickGenerateObserver();
+        const settings = getSettings();
+        // Disabling discards the editor and its draft; hiding the composer
+        // shortcuts deliberately does not.
+        if (!settings.enabled) resetGenerationGuidanceUI();
+
+        if (quickGenerateWanted()) {
+            syncQuickGenerateButton();
+        } else {
             removeQuickGenerateButton();
-            return;
         }
-        startQuickGenerateObserver();
-        syncQuickGenerateButton();
+        // The editor outlives the shortcut preference (the wand entry still
+        // opens it) and its host can be rebuilt at any time, so it is
+        // reconciled independently of whether the shortcuts are shown.
+        if (generationGuidanceUi) syncGenerationGuidanceUI();
+
+        if (settings.enabled && (quickGenerateWanted() || generationGuidanceUi)) {
+            startQuickGenerateObserver();
+        } else {
+            stopQuickGenerateObserver();
+        }
     }
 
     // =========================================================================
@@ -1270,12 +1709,17 @@
         clearTimeout(autoGenerateTimer);
         abortPending();
         clearChoicesUI();
+        // The theme is a draft for the current conversation turn only.
+        resetGenerationGuidanceUI();
     }
 
     function onChatStateChanged() {
         clearTimeout(autoGenerateTimer);
         abortPending();
         clearChoicesUI();
+        // Also reached through swipe, edit, and delete: the draft never
+        // survives into another turn or another chat.
+        resetGenerationGuidanceUI();
     }
 
     function onMessageSwiped() {
