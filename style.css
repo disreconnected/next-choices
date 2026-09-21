@@ -397,23 +397,29 @@
 /* --- Composer quick-generate shortcut ------------------------------------ */
 
 /* Opt-in shortcut for the message-box toolbar. Reuses the .next-choices-tool
-   theme (border/background/body color, hover) but stays fully opaque and gets
-   a full 40px target, matching the enlarged list controls. */
+   theme (background/body color, hover) but stays fully opaque. The box model
+   deliberately copies the neighboring Guided Generations .gg-action-button
+   controls (content-sized, same padding/font-size, same 4px radius) and their
+   brighter --SmartThemeBodyColor border, so the two Next Choices controls sit
+   in the composer toolbar at the same size as the buttons beside them instead
+   of towering over them. */
 .next-choices-quick-generate {
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    flex: 0 0 40px;
-    width: 40px;
-    min-width: 40px;
-    height: 40px;
-    min-height: 40px;
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0;
+    height: auto;
+    min-height: 0;
     margin: 0;
-    padding: 8px;
-    font-size: 18px;
+    padding: 5px 8px;
+    font-size: 1.1em;
     line-height: 1;
     opacity: 1;
+    border: 1px solid var(--SmartThemeBodyColor, #eee);
+    border-radius: 4px;
 }
 
 /* Fallback row: only used while Guided Generations has no toolbar of its own.
@@ -446,6 +452,36 @@
     min-width: 0;
     max-width: 100%;
     justify-content: flex-end;
+}
+
+/* --- Composer theme editor (guided generation) --------------------------- */
+
+/* Mounted as a direct child of #send_form (moved there by the reconciler) so
+   the editor can sit above the composer toolbar; its flex order is copied from
+   whichever host it is placed before. */
+#next_choices_generation_guidance {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    flex-basis: 100%;
+    min-width: 0;
+    padding: 5px;
+    /* #form_sheld inherits white-space: nowrap, so a long theme and the hint
+       text must be allowed to wrap in the narrow composer column. */
+    white-space: normal;
+}
+
+/* The panel is the same disclosure unit the choice-list Enhance panel uses;
+   only its host differs, so it keeps that theme and adds no horizontal
+   overflow on narrow screens. */
+#next_choices_generation_guidance .next-choices-guidance {
+    max-width: 100%;
+}
+
+#next_choices_generation_guidance .next-choices-guidance-input:disabled {
+    opacity: 0.6;
 }
 
 /* --- Settings panel ------------------------------------------------------ */
