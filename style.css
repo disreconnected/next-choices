@@ -133,6 +133,24 @@
     color: var(--SmartThemeBodyColor, #eee);
     opacity: 0.8;
     font-size: calc(var(--mainFontSize, 15px) * 0.95);
+    flex-wrap: wrap;
+}
+
+.next-choices-loading-label {
+    flex: 1 1 180px;
+}
+
+.next-choices-stop {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: var(--mainFontSize, 15px);
+    line-height: 1.2;
 }
 
 .next-choices-spinner {
@@ -251,6 +269,7 @@
     text-align: center;
 }
 
+.next-choices-enhance-stop,
 .next-choices-guidance-submit,
 .next-choices-guidance-close {
     box-sizing: border-box;
@@ -372,6 +391,8 @@
 /* Reuse .next-choices-tool for theme/border/color; add focus and disabled
    states scoped to the new controls so hover-only visibility is never the
    only affordance. */
+.next-choices-stop:focus-visible,
+.next-choices-enhance-stop:focus-visible,
 .next-choices-enhance:focus-visible,
 .next-choices-guidance-submit:focus-visible,
 .next-choices-guidance-close:focus-visible,

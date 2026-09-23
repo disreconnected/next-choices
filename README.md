@@ -28,6 +28,10 @@ The Chinese half reproduced below is the upstream README, so its settings table 
 - The choice row's ♻️ regenerates and ✖ dismisses the choices as before, now with larger targets alongside a centered **Edit** per choice.
 - With the composer button enabled, clicking 🎲 in the toolbar generates a fresh set of choices at any time, without opening the wand menu.
 
+### Stop actions
+- **Stop generating** is available while manual, automatic, regenerated, or guided choices are pending. It clears the loading view and ignores late results; the guided theme draft stays intact. Saved Connection Profile requests receive a request-local abort signal. With **Current connection settings**, SillyTavern's `generateRaw` API exposes no request-local signal, so Stop only cancels the local wait/result and cannot guarantee provider work ends.
+- **Stop enhancing** keeps the displayed choices and enhancement draft, unlocks the panel, and ignores late results.
+
 ### Version
 - This fork's manifest is at **0.3.0**.
 
