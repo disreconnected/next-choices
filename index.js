@@ -262,13 +262,13 @@
      * Sends the raw prompt through the configured backend and returns the
      * response text (string). Throws on failure.
      */
-    async function sendRawRequest(ctx, settings, prompt) {
+    async function sendRawRequest(ctx, settings, prompt, signal, ownedRequestId) {
         const profileId = settings.profileId;
         const cmrs = ctx?.ConnectionManagerRequestService;
 
         if (profileId && profileId !== 'current' && cmrs?.sendRequest) {
             const messages = [{ role: 'user', content: prompt }];
-            const response = await cmrs.sendRequest(profileId, messages, settings.maxTokens);
+            const response = await cmrs.sendRequest(profileId, messages, settings.maxTokens, { signal });
             if (typeof response === 'string') return response;
             if (response && typeof response.content === 'string') return response.content;
             throw new Error(tr('Connection profile returned an unrecognized response'));
@@ -286,6 +286,8 @@
             if (typeof result === 'string') return result;
             throw new Error('empty result');
         } catch (err) {
+            // Do not start a legacy retry for a request already stopped or superseded.
+            if (ownedRequestId !== requestId) throw err;
             console.warn(`[${MODULE_NAME}] generateRaw object form failed, trying legacy form:`, err);
             const legacy = await ctx.generateRaw(prompt, '', false, false, '');
             if (typeof legacy === 'string') return legacy;
@@ -309,6 +311,7 @@
         const guided = reason === 'guided';
         const theme = guided ? String(guidance ?? '').trim() : '';
         if (guided && !theme) return; // empty theme: no request
+        if (guided && !document.getElementById('send_form')) return;
 
         const lastMes = getLastMessage(ctx);
         if (!lastMes) return;
@@ -318,19 +321,21 @@
         // A pending auto-generation would otherwise fire mid-request and abort
         // the guided request it was submitted from.
         if (guided) clearTimeout(autoGenerateTimer);
+        const focusReturnTarget = document.activeElement;
 
         abortPending();
         const myRequestId = requestId;
-        abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const requestController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        abortController = requestController;
         generating = true;
 
         if (guided) setGenerationGuidanceBusy(true);
-        renderLoading();
+        renderLoading(myRequestId, focusReturnTarget);
 
         let text;
         try {
             const prompt = guided ? buildGuidedPrompt(ctx, settings, theme) : buildPrompt(ctx, settings);
-            text = await sendRawRequest(ctx, settings, prompt);
+            text = await sendRawRequest(ctx, settings, prompt, requestController?.signal, myRequestId);
         } catch (err) {
             if (myRequestId !== requestId) return; // stale, ignore
             generating = false;
@@ -488,12 +493,26 @@
         return { $toolbar, $enhance };
     }
 
-    function renderLoading() {
+    function renderLoading(ownedRequestId, focusTarget) {
         const $container = getContainer();
         if (!$container.length) return;
         $container.empty().show();
         const $loading = $('<div class="next-choices-loading"><span class="next-choices-spinner"></span></div>');
-        $loading.append(document.createTextNode(' ' + tr('Generating choices…')));
+        $loading.append($('<span class="next-choices-loading-label"></span>').text(tr('Generating choices…')));
+        const $stop = $('<button type="button" class="next-choices-tool next-choices-stop"></button>')
+            .text(tr('Stop generating'))
+            .attr('aria-label', tr('Stop generating'));
+        $stop.on('click', () => {
+            if (ownedRequestId !== requestId
+                || document.getElementById(CONTAINER_ID) !== $container[0]
+                || !$loading[0].isConnected
+                || $loading.parent()[0] !== $container[0]) return;
+            clearTimeout(autoGenerateTimer);
+            abortPending();
+            $container.empty().hide();
+            restoreFocusAfterGenerationStop(focusTarget);
+        });
+        $loading.append($stop);
         $container.append($loading);
     }
 
@@ -672,6 +691,16 @@
 
         const $submit = $('<button type="button" class="next-choices-tool next-choices-guidance-submit"></button>')
             .text(tr('Enhance choices'));
+        const $stopEnhance = $('<button type="button" class="next-choices-tool next-choices-enhance-stop"></button>')
+            .text(tr('Stop enhancing'))
+            .hide();
+        let enhancementRequestId = null;
+        $stopEnhance.on('click', () => {
+            if (!enhancementBusy || enhancementRequestId !== requestId || !isViewCurrent()) return;
+            abortPending();
+            setBusy(false);
+            $guidanceInput.trigger('focus');
+        });
 
         // Localize the base exemplars first, then splice the persona name into
         // the translated template so host dictionaries only ever see stable keys.
@@ -732,6 +761,7 @@
             toolbar.$enhance.prop('disabled', busy);
             $panel.attr('aria-busy', busy ? 'true' : 'false');
             setPanelControlsDisabled(busy);
+            $stopEnhance.toggle(busy);
             if (busy) {
                 setStatus(tr('Enhancing choices…'));
             } else {
@@ -777,14 +807,16 @@
             clearTimeout(autoGenerateTimer);
             abortPending();
             const myRequestId = requestId;
-            abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            enhancementRequestId = myRequestId;
+            const requestController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            abortController = requestController;
             generating = true;
             setBusy(true);
 
             let response;
             try {
                 const prompt = buildEnhancementPrompt(ctx, settings, originals, guidance);
-                response = await sendRawRequest(ctx, settings, prompt);
+                response = await sendRawRequest(ctx, settings, prompt, requestController?.signal, myRequestId);
             } catch (err) {
                 if (myRequestId !== requestId) return; // stale, ignore
                 generating = false;
@@ -826,7 +858,7 @@
         $submit.on('click', () => enhanceDisplayedChoices());
 
         const $panelActions = $('<div class="next-choices-guidance-actions"></div>');
-        $panelActions.append($submit, $panelClose);
+        $panelActions.append($submit, $stopEnhance, $panelClose);
         // The live status stays OUTSIDE the panel: aria-busy on an ancestor
         // makes assistive tech defer live-region updates inside it, so the
         // "Enhancing choices…" announcement would never be spoken.
@@ -1362,6 +1394,29 @@
             }
         }
     }
+
+    function restoreFocusAfterGenerationStop(target) {
+        const launchers = [
+            document.getElementById(WAND_BUTTON_ID),
+            document.getElementById(QUICK_BUTTON_ID),
+            document.getElementById(GUIDED_BUTTON_ID),
+            document.getElementById(GUIDED_WAND_BUTTON_ID),
+        ];
+        const sendForm = document.getElementById('send_form');
+        // Preserve the original target only when it belongs to this extension's
+        // launchers or the live composer; auto generation may start elsewhere.
+        const targetIsInComposerOrLauncher = !!target
+            && (launchers.includes(target) || !!sendForm?.contains(target));
+        const candidates = targetIsInComposerOrLauncher ? [target, ...launchers] : launchers;
+        candidates.push(document.getElementById('send_textarea'), document.getElementById('send_but'));
+        for (const candidate of candidates) {
+            if (candidate && candidate !== document.body && isRendered(candidate) && !candidate.disabled) {
+                candidate.focus();
+                return;
+            }
+        }
+    }
+
 
     /**
      * Locks the editor for the duration of its own guided request. Released on
