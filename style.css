@@ -199,7 +199,8 @@
 
 /* Guidance panel: hidden via jQuery hide()/show() (inline display), so it
    must not carry a permanent display:flex. */
-.next-choices-guidance {
+.next-choices-guidance,
+.next-choices-combine-panel {
     box-sizing: border-box;
     width: 100%;
     padding: 8px;
@@ -208,28 +209,34 @@
     background-color: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.3));
 }
 
-.next-choices-guidance[aria-busy='true'] {
+.next-choices-guidance[aria-busy='true'],
+.next-choices-combine-panel[aria-busy='true'] {
     opacity: 0.75;
 }
 
-.next-choices-guidance > * + * {
+.next-choices-guidance > * + *,
+.next-choices-combine-panel > * + * {
     margin-top: 6px;
 }
 
 .next-choices-guidance label,
 .next-choices-guidance-hint,
-.next-choices-guidance-status {
+.next-choices-guidance-status,
+.next-choices-combine-hint,
+.next-choices-combine-status {
     display: block;
     font-size: calc(var(--mainFontSize, 15px) * 0.85);
     opacity: 0.8;
 }
 
-.next-choices-guidance-status {
+.next-choices-guidance-status,
+.next-choices-combine-status {
     min-height: 1.2em;
     overflow-wrap: anywhere;
 }
 
-.next-choices-guidance-status:empty {
+.next-choices-guidance-status:empty,
+.next-choices-combine-status:empty {
     display: none;
 }
 
@@ -245,15 +252,17 @@
     color: inherit;
 }
 
-.next-choices-guidance-actions {
+.next-choices-guidance-actions,
+.next-choices-combine-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
 }
 
-/* Toolbar Enhance: a text button with a real target, unlike the square
+/* Toolbar transformations: text buttons with real targets, unlike the square
    icon buttons. */
-.next-choices-enhance {
+.next-choices-enhance,
+.next-choices-combine {
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
@@ -271,7 +280,10 @@
 
 .next-choices-enhance-stop,
 .next-choices-guidance-submit,
-.next-choices-guidance-close {
+.next-choices-guidance-close,
+.next-choices-combine-submit,
+.next-choices-combine-stop,
+.next-choices-combine-cancel {
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
@@ -281,6 +293,34 @@
     font-family: inherit;
     font-size: var(--mainFontSize, 15px);
     line-height: 1.2;
+}
+
+.next-choices-combine-wrap {
+    min-width: 0;
+    white-space: normal;
+}
+
+.next-choices-select {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    cursor: pointer;
+}
+
+.next-choices-select-input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--SmartThemeQuoteColor, var(--SmartThemeBodyColor, #eee));
+    cursor: pointer;
+}
+
+.next-choices-row-selected .next-choices-item {
+    border-color: var(--SmartThemeQuoteColor, var(--SmartThemeBodyColor, #eee));
+    background-color: var(--white20a, rgba(255, 255, 255, 0.12));
 }
 
 /* While an enhancement request is in flight the rows stay visible but inert:
@@ -394,6 +434,11 @@
 .next-choices-stop:focus-visible,
 .next-choices-enhance-stop:focus-visible,
 .next-choices-enhance:focus-visible,
+.next-choices-combine:focus-visible,
+.next-choices-combine-submit:focus-visible,
+.next-choices-combine-stop:focus-visible,
+.next-choices-combine-cancel:focus-visible,
+.next-choices-select-input:focus-visible,
 .next-choices-guidance-submit:focus-visible,
 .next-choices-guidance-close:focus-visible,
 .next-choices-regenerate:focus-visible,
@@ -409,6 +454,11 @@
 
 .next-choices-apply:disabled,
 .next-choices-enhance:disabled,
+.next-choices-combine:disabled,
+.next-choices-combine-submit:disabled,
+.next-choices-combine-stop:disabled,
+.next-choices-combine-cancel:disabled,
+.next-choices-select-input:disabled,
 .next-choices-guidance-submit:disabled,
 .next-choices-guidance-close:disabled {
     opacity: 0.4;
@@ -552,6 +602,8 @@
     .next-choices-toolbar {
         flex-direction: row;
         align-self: flex-end;
+        flex-wrap: wrap;
+        max-width: 100%;
     }
 
     .next-choices-item {

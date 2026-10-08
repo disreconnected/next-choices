@@ -28,9 +28,18 @@ The Chinese half reproduced below is the upstream README, so its settings table 
 - The choice row's ♻️ regenerates and ✖ dismisses the choices as before, now with larger targets alongside a centered **Edit** per choice.
 - With the composer button enabled, clicking 🎲 in the toolbar generates a fresh set of choices at any time, without opening the wand menu.
 
+### Combine selected choices
+- Choose **Combine**, then select at least two options with their checkboxes or preview buttons. **Combine selected** asks the configured model to rewrite their actions and dialogue into one coherent, persona-matched response rather than concatenate them.
+- Only selected choices are replaced. The combined response occupies the earliest selected position; every unselected choice keeps its exact applied text and relative order. Selecting all options leaves one editable, usable response.
+- Apply or Reset any open inline edits before combining. Selection uses committed text in displayed order, never pending editor drafts or formatted preview HTML. Edit and Enhance stay disabled during selection.
+- Selecting or combining never fills or sends the composer, even with **Send on click** enabled. Review the result first; an ordinary click on it uses the existing fill/send preference.
+- **Cancel** discards selection without changing the list. Malformed output or provider errors preserve the original choices and checked selection for an explicit retry. No concatenation fallback or automatic application-level retry is used.
+- Keyboard: Tab between controls, Space on checkboxes, and Enter/Space on buttons. Selection and combination status follow the UI language, including Traditional Chinese.
+
 ### Stop actions
 - **Stop generating** is available while manual, automatic, regenerated, or guided choices are pending. It clears the loading view and ignores late results; the guided theme draft stays intact. Saved Connection Profile requests receive a request-local abort signal. With **Current connection settings**, SillyTavern's `generateRaw` API exposes no request-local signal, so Stop only cancels the local wait/result and cannot guarantee provider work ends.
 - **Stop enhancing** keeps the displayed choices and enhancement draft, unlocks the panel, and ignores late results.
+- **Stop combining** preserves choices, checked selection, and the hidden enhancement draft for retry. Saved Connection Profile requests receive the same request-local abort signal; **Current connection settings** can only discard the result locally, not guarantee provider-side cancellation.
 
 ### Version
 - This fork's manifest is at **0.3.0**.

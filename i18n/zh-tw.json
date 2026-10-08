@@ -50,5 +50,18 @@
     "Choice theme": "選項主題",
     "e.g. invite her to dance": "例如：邀她跳舞",
     "Use one main theme while keeping each choice's tone and approach from your prompt template.": "使用單一主要主題，同時保留 prompt 模板中每個選項的語氣與走向。",
-    "No conversation is available to generate choices.": "沒有可用於生成選項的對話。"
+    "No conversation is available to generate choices.": "沒有可用於生成選項的對話。",
+    "Combine": "合併",
+    "Combine choices": "合併選項",
+    "Combine selected": "合併所選選項",
+    "Cancel": "取消",
+    "Select at least two choices to combine.": "請至少選擇兩個要合併的選項。",
+    "Select choice {number} to combine": "選擇要合併的第 {number} 個選項",
+    "{count} selected": "已選擇 {count} 個選項",
+    "Combining choices…": "合併選項中…",
+    "Stop combining": "停止合併",
+    "Apply or reset your edits before combining choices.": "合併選項前，請先套用或重設你的編輯。",
+    "No conversation is available to combine these choices.": "沒有可用於合併這些選項的對話。",
+    "Failed to combine choices: ": "合併選項失敗：",
+    "Could not parse one combined choice. Try again.": "無法解析出單一合併選項，請再試一次。"
 }
