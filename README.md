@@ -42,7 +42,31 @@ The Chinese half reproduced below is the upstream README, so its settings table 
 - **Stop combining** preserves choices, checked selection, and the hidden enhancement draft for retry. Saved Connection Profile requests receive the same request-local abort signal; **Current connection settings** can only discard the result locally, not guarantee provider-side cancellation.
 
 ### Version
-- This fork's manifest is at **0.3.0**.
+- This fork's manifests (`manifest.json` and `spindle.json`) are at **0.4.0**.
+
+## Lumiverse (Spindle) support
+
+This repo is dual-target. The same checkout installs into **SillyTavern** (via `manifest.json` + `index.js`) and into **Lumiverse** (via `spindle.json` + `dist/`).
+
+### Install in Lumiverse
+1. Open Lumiverse → **Extensions** → install from source and paste this repo's URL:
+   ```
+   https://github.com/disreconnected/next-choices
+   ```
+2. Grant the requested permissions: `generation` (choice generation and "Send on click"), `chats` + `chat_mutation` (read the recent messages), `personas` (fill `{{persona}}`).
+3. Enable the extension. Choices appear above the message composer after each AI reply. "Generate choices" and "Generate choices (guided)" are also available in the composer's Extras menu and in the command palette (Ctrl+K).
+4. Settings live in **Settings → Next Choices** (or the Extensions section on older builds). "Current connection settings" uses Lumiverse's active LLM connection; any other saved LLM connection profile can be selected instead.
+
+Choice generation runs as an out-of-chat request from the extension backend; nothing is written into the chat. Settings are stored per user under Lumiverse's extension storage.
+
+### Building from source
+```
+bun install
+bun test
+bun run build   # writes index.js (SillyTavern), dist/frontend.js and dist/backend.js (Lumiverse)
+```
+`index.js` and `dist/` are generated from `src/` and committed so both hosts can install straight from GitHub. Edit `src/`, not the generated files.
+
 
 ---
 

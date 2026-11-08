@@ -1,0 +1,12 @@
+{
+  "version": "0.4.0",
+  "name": "Next Choices",
+  "identifier": "next_choices",
+  "author": "disreconnected",
+  "github": "https://github.com/disreconnected/next-choices",
+  "homepage": "https://github.com/disreconnected/next-choices",
+  "description": "Suggests player reply choices after each AI message. Click to fill the composer or send; edit, enhance, combine or guide the choices.",
+  "permissions": ["generation", "chats", "chat_mutation", "personas"],
+  "entry_backend": "dist/backend.js",
+  "entry_frontend": "dist/frontend.js"
+}
