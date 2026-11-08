@@ -11,7 +11,6 @@
 import type {
     SpindleFrontendContext,
     SpindleInputBarActionHandle,
-    SpindleSettingsTabHandle,
 } from 'lumiverse-spindle-types';
 import { parseChoices } from '../shared/parse';
 import {
@@ -94,7 +93,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     let mountWarned = false;
     let guidanceEditor: GuidanceEditor | null = null;
     let settingsPanel: SettingsPanel | null = null;
-    let settingsTab: SpindleSettingsTabHandle | null = null;
+    let settingsHeading: HTMLElement | null = null;
     const inputActions: Array<{ handle: SpindleInputBarActionHandle; label: string }> = [];
 
     let sequence = 0; // request counter: a result is stale once it no longer matches
@@ -531,31 +530,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
 
     function initSettingsPanel(): void {
-        let root: HTMLElement | null = null;
-        if (typeof ctx.ui.registerSettingsTab === 'function') {
-            try {
-                const tab = ctx.ui.registerSettingsTab({
-                    id: 'next_choices',
-                    title: tr('Next Choices'),
-                    shortName: tr('Choices'),
-                    description: tr('Next Choices settings'),
-                    keywords: ['choices', 'suggest', 'reply', 'next choices'],
-                });
-                settingsTab = tab;
-                root = tab.root;
-                track(() => tab.destroy());
-            } catch (err) {
-                console.warn(`${LOG} registerSettingsTab failed, using the extensions section:`, err);
-                settingsTab = null;
-            }
-        }
-        if (!root) {
-            const section = ctx.ui.mount('settings_extensions') as HTMLElement;
-            const body = h('div', { children: [h('h3', { text: tr('Next Choices') })] });
-            section.append(body);
-            root = body;
-            track(() => body.remove());
-        }
+        // Lumiverse's convention: extension settings live under Settings -> Extensions.
+        // Rendering here also lights up the per-extension "Settings" button in the
+        // Extensions panel, which deep-links to this section.
+        const section = ctx.ui.mount('settings_extensions') as HTMLElement;
+        settingsHeading = h('h3', { text: tr('Next Choices') });
+        const root = h('div', { children: [settingsHeading] });
+        section.append(root);
+        track(() => root.remove());
 
         const panel = createSettingsPanel({
             root,
@@ -568,8 +550,15 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         settingsPanel = panel;
         track(() => panel.destroy());
         void panel.refreshProfiles();
-        // The connection list can change while the tab is closed: reload it on every visit.
-        if (settingsTab) track(settingsTab.onActivate(() => void panel.refreshProfiles()));
+        // The connection list can change while Settings is closed: reload it whenever
+        // the section comes back into view.
+        if (typeof IntersectionObserver === 'function') {
+            const observer = new IntersectionObserver((entries) => {
+                if (entries.some((entry) => entry.isIntersecting)) void panel.refreshProfiles();
+            });
+            observer.observe(root);
+            track(() => observer.disconnect());
+        }
     }
 
     // =========================================================================
@@ -678,7 +667,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
                 ctx.locale.subscribe((locale) => {
                     setLocale(locale);
                     for (const { handle, label } of inputActions) handle.setLabel(tr(label));
-                    settingsTab?.setTitle(tr('Next Choices'));
+                    if (settingsHeading) settingsHeading.textContent = tr('Next Choices');
                     settingsPanel?.relabel();
                     quick.relabel();
                 }),

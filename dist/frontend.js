@@ -2375,7 +2375,7 @@ function setup(ctx) {
   let mountWarned = false;
   let guidanceEditor = null;
   let settingsPanel = null;
-  let settingsTab = null;
+  let settingsHeading = null;
   const inputActions = [];
   let sequence = 0;
   let abortController = null;
@@ -2717,31 +2717,11 @@ function setup(ctx) {
     return listed.map((profile) => ({ id: profile.id, name: profile.name, model: profile.model }));
   }
   function initSettingsPanel() {
-    let root = null;
-    if (typeof ctx.ui.registerSettingsTab === "function") {
-      try {
-        const tab = ctx.ui.registerSettingsTab({
-          id: "next_choices",
-          title: tr("Next Choices"),
-          shortName: tr("Choices"),
-          description: tr("Next Choices settings"),
-          keywords: ["choices", "suggest", "reply", "next choices"]
-        });
-        settingsTab = tab;
-        root = tab.root;
-        track(() => tab.destroy());
-      } catch (err) {
-        console.warn(`${LOG} registerSettingsTab failed, using the extensions section:`, err);
-        settingsTab = null;
-      }
-    }
-    if (!root) {
-      const section = ctx.ui.mount("settings_extensions");
-      const body = h("div", { children: [h("h3", { text: tr("Next Choices") })] });
-      section.append(body);
-      root = body;
-      track(() => body.remove());
-    }
+    const section = ctx.ui.mount("settings_extensions");
+    settingsHeading = h("h3", { text: tr("Next Choices") });
+    const root = h("div", { children: [settingsHeading] });
+    section.append(root);
+    track(() => root.remove());
     const panel = createSettingsPanel({
       root,
       components: ctx.components,
@@ -2753,8 +2733,14 @@ function setup(ctx) {
     settingsPanel = panel;
     track(() => panel.destroy());
     panel.refreshProfiles();
-    if (settingsTab)
-      track(settingsTab.onActivate(() => void panel.refreshProfiles()));
+    if (typeof IntersectionObserver === "function") {
+      const observer = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting))
+          panel.refreshProfiles();
+      });
+      observer.observe(root);
+      track(() => observer.disconnect());
+    }
   }
   function registerInputBarActions() {
     const specs = [
@@ -2850,7 +2836,8 @@ function setup(ctx) {
         setLocale(locale);
         for (const { handle, label } of inputActions)
           handle.setLabel(tr(label));
-        settingsTab?.setTitle(tr("Next Choices"));
+        if (settingsHeading)
+          settingsHeading.textContent = tr("Next Choices");
         settingsPanel?.relabel();
         quick.relabel();
       }));
