@@ -1,7 +1,20 @@
-# Next Choices (fork)
+# Next Choices
+
+Suggested player replies for AI roleplay chats, for **SillyTavern** and **Lumiverse**. After each AI
+message the extension asks a model for a few in-persona response options and shows them as a row
+above the message box. Click one to fill it in (or send it), edit it inline, **Enhance** the set with a
+direction, **Combine** several into one reply, or generate a **guided** set around a theme. The
+request never enters the chat log.
 
 Fork of [pdatone/next-choices](https://github.com/pdatone/next-choices) with the enhancements listed
-below. The upstream README is reproduced unchanged at the bottom of this file.
+below, plus a Lumiverse (Spindle) port that installs from this same repo (see
+[Lumiverse support](#lumiverse-spindle-support)). The upstream README is reproduced unchanged at the
+bottom of this file.
+
+| Frontend | Install | Entry |
+| --- | --- | --- |
+| SillyTavern | Extensions → Install extension → paste this repo URL | `manifest.json` + `index.js` |
+| Lumiverse | Extensions panel → install from source → paste this repo URL | `spindle.json` + `dist/` |
 
 ## Enhancements on this fork
 
