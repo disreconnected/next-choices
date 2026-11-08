@@ -2357,6 +2357,7 @@ function setup(ctx) {
   const settings = { ...DEFAULT_SETTINGS };
   const rpc = createRpcClient(ctx);
   track(() => rpc.dispose());
+  ctx.ready();
   track(ctx.dom.addStyle(STYLES));
   function getActiveChat() {
     try {
@@ -2881,9 +2882,6 @@ function setup(ctx) {
     } catch (err) {
       if (!disposed)
         console.error(`${LOG} Init failed:`, err);
-    } finally {
-      if (!disposed)
-        ctx.ready();
     }
   }
   start();

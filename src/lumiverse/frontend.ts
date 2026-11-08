@@ -58,7 +58,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         if (typeof fn === 'function') cleanups.push(fn);
     };
 
-    // Startup messages stay queued until ready(), which is called once the settings are known.
+    // The host queues backend messages until ready(). Defer only until the RPC
+    // handler below is registered: waiting for the settings reply here would
+    // deadlock, because that reply is itself a queued startup message.
     ctx.deferReady?.();
     try {
         setLocale(ctx.locale?.get?.());
@@ -70,6 +72,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const settings: NextChoicesSettings = { ...DEFAULT_SETTINGS };
     const rpc: RpcClient = createRpcClient(ctx);
     track(() => rpc.dispose());
+    ctx.ready();
     track(ctx.dom.addStyle(STYLES));
 
     function getActiveChat(): { chatId: string | null; characterId: string | null } {
@@ -712,8 +715,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             init();
         } catch (err) {
             if (!disposed) console.error(`${LOG} Init failed:`, err);
-        } finally {
-            if (!disposed) ctx.ready();
         }
     }
     void start();
