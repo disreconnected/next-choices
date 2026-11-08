@@ -33,19 +33,19 @@ export interface BackendApi {
     ): () => void;
     sendToFrontend(payload: unknown, userId?: string, options?: { frontendSessionId?: string }): void;
     userStorage: {
-        getJson(path: string, options?: { fallback?: unknown }): Promise<unknown>;
-        setJson(path: string, value: unknown): Promise<void>;
+        getJson(path: string, options?: { fallback?: unknown; userId?: string }): Promise<unknown>;
+        setJson(path: string, value: unknown, options?: { userId?: string }): Promise<void>;
     };
     chat: {
         getMessages(chatId: string, options?: { tail?: number; light?: boolean }): Promise<unknown[]>;
     };
     personas: {
-        getActive(): Promise<{ name?: string; description?: string } | null>;
+        getActive(userId?: string): Promise<{ name?: string; description?: string } | null>;
     };
     macros: {
         resolve(
             template: string,
-            options?: { chatId?: string; characterId?: string; commit?: boolean },
+            options?: { chatId?: string; characterId?: string; commit?: boolean; userId?: string },
         ): Promise<{ text: string }>;
     };
     generate: {
@@ -166,6 +166,7 @@ export function initBackend(api: BackendApi): () => void {
 
     async function getContext(
         msg: Extract<FrontendMessage, { type: 'get_context' }>,
+        userId: string,
     ): Promise<Extract<BackendMessage, { type: 'context' }>> {
         const messages = await fetchMessages(msg.chatId, msg.historyDepth);
         const visible = messages.filter((m) => m.role !== 'system' && !isHidden(m));
@@ -178,7 +179,7 @@ export function initBackend(api: BackendApi): () => void {
 
         let persona: Awaited<ReturnType<BackendApi['personas']['getActive']>> = null;
         try {
-            persona = await api.personas.getActive();
+            persona = await api.personas.getActive(userId);
         } catch (err) {
             log('warn', `personas.getActive failed (${errorMessage(err)}); continuing without a persona`);
         }
@@ -202,11 +203,14 @@ export function initBackend(api: BackendApi): () => void {
     function dispatchGenerate(
         msg: Extract<FrontendMessage, { type: 'generate' }>,
         signal: AbortSignal,
+        userId: string,
     ): Promise<unknown> {
         const base = {
             messages: [{ role: 'user' as const, content: msg.prompt }],
             parameters: { max_tokens: Math.max(1, Math.floor(msg.maxTokens)) },
             signal,
+            // Required for operator-scoped installs; ignored for user-scoped ones.
+            userId,
         };
         // null / '' = "Current connection": the user's active connection and preset.
         const dispatch = (extra: Pick<GenerationRequestDTO, 'reasoning'>): Promise<unknown> =>
@@ -225,11 +229,12 @@ export function initBackend(api: BackendApi): () => void {
     async function generate(
         msg: Extract<FrontendMessage, { type: 'generate' }>,
         reply: (message: BackendMessage) => void,
+        userId: string,
     ): Promise<void> {
         const ctrl = new AbortController();
         pending.set(msg.requestId, ctrl);
         try {
-            const text = extractText(await dispatchGenerate(msg, ctrl.signal));
+            const text = extractText(await dispatchGenerate(msg, ctrl.signal, userId));
             reply({ type: 'result', requestId: msg.requestId, text });
         } catch (err) {
             reply({
@@ -245,13 +250,15 @@ export function initBackend(api: BackendApi): () => void {
 
     // -- request dispatch ---------------------------------------------------
 
-    async function handle(msg: FrontendMessage, reply: (message: BackendMessage) => void): Promise<void> {
+    // `userId` is the sender; every user-scoped host call gets it, which an
+    // operator-scoped install requires and a user-scoped install ignores.
+    async function handle(msg: FrontendMessage, reply: (message: BackendMessage) => void, userId: string): Promise<void> {
         switch (msg.type) {
             case 'load_settings': {
                 // Always answers with settings: the frontend polls until it gets one.
                 let stored: unknown = DEFAULT_SETTINGS;
                 try {
-                    stored = await api.userStorage.getJson(SETTINGS_PATH, { fallback: DEFAULT_SETTINGS });
+                    stored = await api.userStorage.getJson(SETTINGS_PATH, { fallback: DEFAULT_SETTINGS, userId });
                 } catch (err) {
                     log('error', `could not read ${SETTINGS_PATH} (${errorMessage(err)}); using defaults`);
                 }
@@ -260,12 +267,12 @@ export function initBackend(api: BackendApi): () => void {
             }
             case 'save_settings': {
                 const settings = normalizeSettings(msg.settings);
-                await api.userStorage.setJson(SETTINGS_PATH, settings);
+                await api.userStorage.setJson(SETTINGS_PATH, settings, { userId });
                 reply({ type: 'settings', requestId: msg.requestId, settings });
                 return;
             }
             case 'get_context':
-                reply(await getContext(msg));
+                reply(await getContext(msg, userId));
                 return;
             case 'resolve_macros': {
                 // The frontend already swapped {{history}} for a placeholder; the
@@ -277,6 +284,7 @@ export function initBackend(api: BackendApi): () => void {
                         chatId: msg.chatId,
                         characterId: msg.characterId ?? undefined,
                         commit: false,
+                        userId,
                     });
                     if (typeof resolved?.text === 'string') text = resolved.text;
                 } catch (err) {
@@ -286,7 +294,7 @@ export function initBackend(api: BackendApi): () => void {
                 return;
             }
             case 'generate':
-                await generate(msg, reply);
+                await generate(msg, reply, userId);
                 return;
             case 'cancel':
                 // The `generate` handler answers with `aborted: true`.
@@ -304,7 +312,7 @@ export function initBackend(api: BackendApi): () => void {
         const reply = (message: BackendMessage): void =>
             api.sendToFrontend(message, userId, frontendSessionId ? { frontendSessionId } : undefined);
         try {
-            await handle(payload, reply);
+            await handle(payload, reply, userId);
         } catch (err) {
             log('error', `${payload.type} failed: ${errorMessage(err)}`);
             try {

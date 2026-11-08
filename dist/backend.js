@@ -180,7 +180,7 @@ function initBackend(api) {
       return asMessages(await api.chat.getMessages(chatId)).slice(-tail);
     }
   }
-  async function getContext(msg) {
+  async function getContext(msg, userId) {
     const messages = await fetchMessages(msg.chatId, msg.historyDepth);
     const visible = messages.filter((m) => m.role !== "system" && !isHidden(m));
     const history = visible.slice(-Math.max(1, Math.floor(msg.historyDepth))).map((m) => ({
@@ -190,7 +190,7 @@ function initBackend(api) {
     }));
     let persona = null;
     try {
-      persona = await api.personas.getActive();
+      persona = await api.personas.getActive(userId);
     } catch (err) {
       log("warn", `personas.getActive failed (${errorMessage(err)}); continuing without a persona`);
     }
@@ -207,11 +207,12 @@ function initBackend(api) {
       lastIsUser: last !== undefined && isUserMessage(last)
     };
   }
-  function dispatchGenerate(msg, signal) {
+  function dispatchGenerate(msg, signal, userId) {
     const base = {
       messages: [{ role: "user", content: msg.prompt }],
       parameters: { max_tokens: Math.max(1, Math.floor(msg.maxTokens)) },
-      signal
+      signal,
+      userId
     };
     const dispatch = (extra) => msg.connectionId ? api.generate.raw({ type: "raw", connection_id: msg.connectionId, ...base, ...extra }) : api.generate.quiet({ type: "quiet", ...base, ...extra });
     return dispatch({ reasoning: { source: "off" } }).catch((err) => {
@@ -221,11 +222,11 @@ function initBackend(api) {
       return dispatch({});
     });
   }
-  async function generate(msg, reply) {
+  async function generate(msg, reply, userId) {
     const ctrl = new AbortController;
     pending.set(msg.requestId, ctrl);
     try {
-      const text = extractText(await dispatchGenerate(msg, ctrl.signal));
+      const text = extractText(await dispatchGenerate(msg, ctrl.signal, userId));
       reply({ type: "result", requestId: msg.requestId, text });
     } catch (err) {
       reply({
@@ -239,12 +240,12 @@ function initBackend(api) {
         pending.delete(msg.requestId);
     }
   }
-  async function handle(msg, reply) {
+  async function handle(msg, reply, userId) {
     switch (msg.type) {
       case "load_settings": {
         let stored = DEFAULT_SETTINGS;
         try {
-          stored = await api.userStorage.getJson(SETTINGS_PATH, { fallback: DEFAULT_SETTINGS });
+          stored = await api.userStorage.getJson(SETTINGS_PATH, { fallback: DEFAULT_SETTINGS, userId });
         } catch (err) {
           log("error", `could not read ${SETTINGS_PATH} (${errorMessage(err)}); using defaults`);
         }
@@ -253,12 +254,12 @@ function initBackend(api) {
       }
       case "save_settings": {
         const settings = normalizeSettings(msg.settings);
-        await api.userStorage.setJson(SETTINGS_PATH, settings);
+        await api.userStorage.setJson(SETTINGS_PATH, settings, { userId });
         reply({ type: "settings", requestId: msg.requestId, settings });
         return;
       }
       case "get_context":
-        reply(await getContext(msg));
+        reply(await getContext(msg, userId));
         return;
       case "resolve_macros": {
         let text = msg.template;
@@ -266,7 +267,8 @@ function initBackend(api) {
           const resolved = await api.macros.resolve(msg.template, {
             chatId: msg.chatId,
             characterId: msg.characterId ?? undefined,
-            commit: false
+            commit: false,
+            userId
           });
           if (typeof resolved?.text === "string")
             text = resolved.text;
@@ -277,7 +279,7 @@ function initBackend(api) {
         return;
       }
       case "generate":
-        await generate(msg, reply);
+        await generate(msg, reply, userId);
         return;
       case "cancel":
         pending.get(msg.targetRequestId)?.abort();
@@ -291,7 +293,7 @@ function initBackend(api) {
     }
     const reply = (message) => api.sendToFrontend(message, userId, frontendSessionId ? { frontendSessionId } : undefined);
     try {
-      await handle(payload, reply);
+      await handle(payload, reply, userId);
     } catch (err) {
       log("error", `${payload.type} failed: ${errorMessage(err)}`);
       try {

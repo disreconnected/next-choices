@@ -243,7 +243,7 @@ describe('settings', () => {
     test('load_settings reads settings.json with the defaults as fallback', async () => {
         const { fake } = start();
         await fake.deliver({ type: 'load_settings', requestId: 'r1' });
-        expect(fake.calls.getJson).toEqual([['settings.json', { fallback: DEFAULT_SETTINGS }]]);
+        expect(fake.calls.getJson).toEqual([['settings.json', { fallback: DEFAULT_SETTINGS, userId: 'u1' }]]);
         expect(fake.replies()).toEqual([{ type: 'settings', requestId: 'r1', settings: { ...DEFAULT_SETTINGS } }]);
     });
 
@@ -440,8 +440,8 @@ describe('resolve_macros', () => {
         await fake.deliver({ type: 'resolve_macros', requestId: 'm1', template: 'a {{description}}', chatId: 'chat-1', characterId: null });
         await fake.deliver({ type: 'resolve_macros', requestId: 'm2', template: 'b', chatId: 'chat-1', characterId: 'char-1' });
         expect(fake.calls.macros).toEqual([
-            ['a {{description}}', { chatId: 'chat-1', characterId: undefined, commit: false }],
-            ['b', { chatId: 'chat-1', characterId: 'char-1', commit: false }],
+            ['a {{description}}', { chatId: 'chat-1', characterId: undefined, commit: false, userId: 'u1' }],
+            ['b', { chatId: 'chat-1', characterId: 'char-1', commit: false, userId: 'u1' }],
         ]);
         expect(fake.replies()).toEqual([
             { type: 'macros', requestId: 'm1', text: 'a DESC' },
