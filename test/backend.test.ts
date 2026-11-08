@@ -21,7 +21,7 @@ function makeFake() {
     const logs: string[] = [];
     const generateCalls: { kind: 'raw' | 'quiet'; input: GenerationRequestDTO }[] = [];
     const calls = {
-        getJson: [] as [string, { fallback?: unknown } | undefined][],
+        getJson: [] as [string, { fallback?: unknown; userId?: string } | undefined][],
         setJson: [] as [string, unknown][],
         getMessages: [] as unknown[][],
         macros: [] as unknown[][],
