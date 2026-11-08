@@ -55,7 +55,7 @@ This repo is dual-target. The same checkout installs into **SillyTavern** (via `
    ```
 2. Grant the requested permissions: `generation` (choice generation and "Send on click"), `chats` + `chat_mutation` (read the recent messages), `personas` (fill `{{persona}}`).
 3. Enable the extension. Choices appear above the message composer after each AI reply. "Generate choices" and "Generate choices (guided)" are also available in the composer's Extras menu and in the command palette (Ctrl+K).
-4. Settings live in **Settings → Next Choices** (or the Extensions section on older builds). "Current connection settings" uses Lumiverse's active LLM connection; any other saved LLM connection profile can be selected instead.
+4. Settings live in **Settings → Extensions → Next Choices** (also reachable from the extension's card in the Extensions panel via its Settings button). "Current connection settings" uses Lumiverse's active LLM connection; any other saved LLM connection profile can be selected instead.
 
 Choice generation runs as an out-of-chat request from the extension backend; nothing is written into the chat. Settings are stored per user under Lumiverse's extension storage.
 
