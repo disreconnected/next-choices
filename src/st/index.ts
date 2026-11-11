@@ -1,0 +1,1450 @@
+// @ts-nocheck
+
+'use strict';
+
+import { parseChoices, parseRewrittenChoices } from '../shared/parse';
+import {
+    DEFAULT_SETTINGS,
+    MODULE_NAME,
+    backfillDefaults,
+    normalizeHistoryDepth,
+    normalizeMaxTokens,
+    normalizeNumChoices,
+    normalizeProfileId,
+    normalizePromptTemplate,
+    upgradeLegacyTemplate,
+} from '../shared/settings';
+import { DEFAULT_PROMPT_TEMPLATE } from '../shared/templates';
+import {
+    buildCombinationPrompt,
+    buildEnhancementPrompt,
+    buildGuidedPrompt,
+    buildPrompt,
+} from './prompt';
+
+(() => {
+    const CONTAINER_ID = 'next_choices_container';
+
+    function getContext() {
+        try {
+            return globalThis.SillyTavern?.getContext?.() ?? null;
+        } catch (err) {
+            console.error(`[${MODULE_NAME}] Failed to get SillyTavern context:`, err);
+            return null;
+        }
+    }
+
+    function getSettings() {
+        const ctx = getContext();
+        if (!ctx?.extensionSettings) {
+            return { ...DEFAULT_SETTINGS };
+        }
+        if (!ctx.extensionSettings[MODULE_NAME]) {
+            ctx.extensionSettings[MODULE_NAME] = { ...DEFAULT_SETTINGS };
+        }
+        const stored = ctx.extensionSettings[MODULE_NAME];
+        backfillDefaults(stored);
+        if (upgradeLegacyTemplate(stored)) saveSettings();
+        return stored;
+    }
+
+    function saveSettings() {
+        const ctx = getContext();
+        try {
+            ctx?.saveSettingsDebounced?.();
+        } catch (err) {
+            console.error(`[${MODULE_NAME}] Failed to save settings:`, err);
+        }
+    }
+
+    function tr(text) {
+        const ctx = getContext();
+        try {
+            if (typeof ctx?.translate === 'function') return ctx.translate(text);
+            if (typeof ctx?.t === 'function') return ctx.t`${text}`;
+        } catch { }
+        return text;
+    }
+
+    function getLastMessage(ctx) {
+        const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
+        for (let i = chat.length - 1; i >= 0; i--) {
+            if (chat[i] && !chat[i].is_system) return chat[i];
+        }
+        return null;
+    }
+
+    let requestId = 0;
+    let abortController = null;
+    let generating = false;
+
+    function abortPending() {
+        requestId++;
+        generating = false;
+        try {
+            abortController?.abort();
+        } catch { }
+        abortController = null;
+        setGenerationGuidanceBusy(false);
+    }
+
+    async function sendRawRequest(ctx, settings, prompt, signal, ownedRequestId) {
+        const profileId = settings.profileId;
+        const cmrs = ctx?.ConnectionManagerRequestService;
+
+        if (profileId && profileId !== 'current' && cmrs?.sendRequest) {
+            const messages = [{ role: 'user', content: prompt }];
+            const response = await cmrs.sendRequest(profileId, messages, settings.maxTokens, { signal });
+            if (typeof response === 'string') return response;
+            if (response && typeof response.content === 'string') return response.content;
+            throw new Error(tr('Connection profile returned an unrecognized response'));
+        }
+
+        if (typeof ctx?.generateRaw !== 'function') {
+            throw new Error(tr('generateRaw is not available'));
+        }
+
+        try {
+            const result = await ctx.generateRaw({ prompt, systemPrompt: '' });
+            if (typeof result === 'string' && result.length > 0) return result;
+            if (result && typeof result.content === 'string') return result.content;
+            if (typeof result === 'string') return result;
+            throw new Error('empty result');
+        } catch (err) {
+            if (ownedRequestId !== requestId) throw err;
+            console.warn(`[${MODULE_NAME}] generateRaw object form failed, trying legacy form:`, err);
+            const legacy = await ctx.generateRaw(prompt, '', false, false, '');
+            if (typeof legacy === 'string') return legacy;
+            if (legacy && typeof legacy.content === 'string') return legacy.content;
+            throw new Error(tr('generateRaw returned an unrecognized response'));
+        }
+    }
+
+    async function generateChoices(reason = 'manual', guidance = '') {
+        const ctx = getContext();
+        const settings = { ...getSettings() };
+        if (!ctx || !settings.enabled) return;
+        if (reason === 'auto' && !settings.autoGenerate) return;
+
+        const guided = reason === 'guided';
+        const theme = guided ? String(guidance ?? '').trim() : '';
+        if (guided && !theme) return;
+        if (guided && !document.getElementById('send_form')) return;
+
+        const lastMes = getLastMessage(ctx);
+        if (!lastMes) return;
+        if (reason === 'auto' && lastMes.is_user) return;
+
+        if (guided) clearTimeout(autoGenerateTimer);
+        const focusReturnTarget = document.activeElement;
+
+        abortPending();
+        const myRequestId = requestId;
+        const requestController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        abortController = requestController;
+        generating = true;
+
+        if (guided) setGenerationGuidanceBusy(true);
+        renderLoading(myRequestId, focusReturnTarget);
+
+        let text;
+        try {
+            const prompt = guided ? buildGuidedPrompt(ctx, settings, theme) : buildPrompt(ctx, settings);
+            text = await sendRawRequest(ctx, settings, prompt, requestController?.signal, myRequestId);
+        } catch (err) {
+            if (myRequestId !== requestId) return;
+            generating = false;
+            if (guided) setGenerationGuidanceBusy(false);
+            console.error(`[${MODULE_NAME}] Generation failed:`, err);
+            renderError(err?.message ?? String(err), theme);
+            return;
+        }
+
+        if (myRequestId !== requestId) return;
+        generating = false;
+        if (guided) setGenerationGuidanceBusy(false);
+
+        const choices = parseChoices(text, settings.numChoices);
+        if (!choices.length) {
+            renderError(tr('Could not parse choices from the model response'), theme);
+            return;
+        }
+        renderChoices(choices, theme);
+        if (guided && generationGuidanceUi?.open) setGenerationGuidanceOpen(false);
+    }
+
+    function getContainer() {
+        let $container = $(`#${CONTAINER_ID}`);
+        if ($container.length) return $container;
+
+        $container = $(`<div id="${CONTAINER_ID}" class="next-choices-container"></div>`);
+        const $sendForm = $('#send_form');
+        if ($sendForm.length) {
+            $container.insertBefore($sendForm);
+        } else {
+            const $formSheld = $('#form_sheld');
+            if ($formSheld.length) {
+                $formSheld.prepend($container);
+            } else {
+                return $();
+            }
+        }
+        return $container;
+    }
+
+    function clearChoicesUI() {
+        const $container = $(`#${CONTAINER_ID}`);
+        $container.empty().hide();
+    }
+
+    function makeToolbar(onEnhance = null, generationGuidance = '', onCombine = null) {
+        const $toolbar = $('<div class="next-choices-toolbar"></div>');
+        const $regen = $('<button type="button" class="next-choices-tool next-choices-regenerate"></button>')
+            .text('♻️')
+            .attr('title', tr('Regenerate'))
+            .attr('aria-label', tr('Regenerate'));
+        $regen.on('click', () => generateChoices(generationGuidance ? 'guided' : 'manual', generationGuidance));
+
+        let $enhance = $();
+        if (typeof onEnhance === 'function') {
+            $enhance = $('<button type="button" class="next-choices-tool next-choices-enhance"></button>')
+                .text(tr('Enhance'))
+                .attr('title', tr('Enhance choices'))
+                .attr('aria-label', tr('Enhance choices'))
+                .attr('aria-controls', 'next_choices_guidance_panel')
+                .attr('aria-expanded', 'false');
+            $enhance.on('click', () => onEnhance());
+        }
+
+        let $combine = $();
+        if (typeof onCombine === 'function') {
+            $combine = $('<button type="button" class="next-choices-tool next-choices-combine"></button>')
+                .text(tr('Combine'))
+                .attr('title', tr('Combine choices'))
+                .attr('aria-label', tr('Combine choices'))
+                .attr('aria-controls', 'next_choices_combine_panel')
+                .attr('aria-expanded', 'false');
+            $combine.on('click', () => onCombine());
+            $combine.on('keydown', (event) => event.stopPropagation());
+        }
+
+        const $close = $('<button type="button" class="next-choices-tool next-choices-dismiss"></button>')
+            .text('✖')
+            .attr('title', tr('Dismiss'))
+            .attr('aria-label', tr('Dismiss'));
+        $close.on('click', () => clearChoicesUI());
+        $toolbar.append($regen, $enhance, $combine, $close);
+        return { $toolbar, $enhance, $combine };
+    }
+
+    function renderLoading(ownedRequestId, focusTarget) {
+        const $container = getContainer();
+        if (!$container.length) return;
+        $container.empty().show();
+        const $loading = $('<div class="next-choices-loading"><span class="next-choices-spinner"></span></div>');
+        $loading.append($('<span class="next-choices-loading-label"></span>').text(tr('Generating choices…')));
+        const $stop = $('<button type="button" class="next-choices-tool next-choices-stop"></button>')
+            .text(tr('Stop generating'))
+            .attr('aria-label', tr('Stop generating'));
+        $stop.on('click', () => {
+            if (ownedRequestId !== requestId
+                || document.getElementById(CONTAINER_ID) !== $container[0]
+                || !$loading[0].isConnected
+                || $loading.parent()[0] !== $container[0]) return;
+            clearTimeout(autoGenerateTimer);
+            abortPending();
+            $container.empty().hide();
+            restoreFocusAfterGenerationStop(focusTarget);
+        });
+        $loading.append($stop);
+        $container.append($loading);
+    }
+
+    function renderError(message, generationGuidance = '') {
+        const $container = getContainer();
+        if (!$container.length) return;
+        $container.empty().show();
+        const $error = $('<div class="next-choices-error"></div>');
+        $error.append($('<span></span>').text(tr('Failed to generate choices: ') + message));
+        const $retry = $('<button type="button" class="next-choices-retry menu_button"></button>').text(tr('Retry'));
+        $retry.on('click', () => generateChoices(generationGuidance ? 'guided' : 'manual', generationGuidance));
+        $error.append($retry);
+        $container.append($error, makeToolbar(null, generationGuidance).$toolbar);
+    }
+
+    function formatChoiceHtml(choiceText) {
+        const ctx = getContext();
+        if (typeof ctx?.messageFormatting !== 'function') return null;
+        try {
+            const formatted = ctx.messageFormatting(choiceText, ctx.name1 ?? '', false, true, -1);
+            if (typeof formatted === 'string' && formatted.length > 0) return formatted;
+            return null;
+        } catch (err) {
+            console.warn(`[${MODULE_NAME}] messageFormatting failed, falling back to plain text:`, err);
+            return null;
+        }
+    }
+
+    function renderChoices(choices, generationGuidance = '') {
+        const $container = getContainer();
+        if (!$container.length) return;
+        $container.empty().show();
+        const currentChoices = choices.map((choice) => String(choice ?? ''));
+        let openEditors = 0;
+        let enhancementBusy = false;
+        const selectedChoiceIndexes = new Set();
+        let combinationOpen = false;
+        let combinationBusy = false;
+        let combinationRequestId = null;
+        const rowRefs = [];
+        const $list = $('<div class="next-choices-list"></div>');
+        choices.forEach((choice, index) => {
+            const number = index + 1;
+            const $row = $('<div class="next-choices-row"></div>');
+
+            const $select = $('<label class="next-choices-select"></label>').hide();
+            const $checkbox = $('<input type="checkbox" class="next-choices-select-input">')
+                .attr('aria-label', tr('Select choice {number} to combine').replaceAll('{number}', String(number)));
+            $select.append($checkbox);
+            $checkbox.on('change', () => toggleCombinationChoice(index));
+            $checkbox.on('keydown', (event) => event.stopPropagation());
+
+            const $btn = $('<button type="button" class="next-choices-item"></button>');
+            const renderPreview = () => {
+                const text = currentChoices[index];
+                const formatted = formatChoiceHtml(text);
+                if (formatted !== null) {
+                    $btn.html(formatted);
+                } else {
+                    $btn.text(text);
+                }
+            };
+            renderPreview();
+            $btn.on('click', () => {
+                if (combinationOpen) toggleCombinationChoice(index);
+                else applyChoice(currentChoices[index]);
+            });
+            $btn.on('keydown', (event) => {
+                if (combinationOpen) event.stopPropagation();
+            });
+
+            const $edit = $('<button type="button" class="next-choices-edit next-choices-tool"></button>');
+            $edit.text(tr('Edit'));
+            $edit.attr('aria-label', `${tr('Edit choice')} ${number}`);
+
+            const $editor = $('<div class="next-choices-editor"></div>').hide();
+            const $input = $('<textarea class="text_pole next-choices-edit-input" rows="4"></textarea>');
+            $input.attr('aria-label', `${tr('Edit choice')} ${number}`);
+            $input.on('keydown', (event) => event.stopPropagation());
+
+            const $apply = $('<button type="button" class="next-choices-apply next-choices-tool"></button>');
+            $apply.text(tr('Apply changes'));
+            const $reset = $('<button type="button" class="next-choices-reset next-choices-tool"></button>');
+            $reset.text(tr('Reset changes'));
+
+            const refreshApplyState = () => {
+                const hasText = String($input.val() ?? '').trim().length > 0;
+                $apply.prop('disabled', !hasText);
+            };
+            $input.on('input', refreshApplyState);
+
+            const setEditing = (editing) => {
+                if (editing) {
+                    openEditors++;
+                    $btn.hide();
+                    $edit.hide();
+                    $editor.show();
+                    $input.trigger('focus');
+                } else {
+                    openEditors = Math.max(0, openEditors - 1);
+                    $editor.hide();
+                    $btn.show();
+                    $edit.show();
+                }
+                refreshGuidanceAvailability();
+                refreshCombinationAvailability();
+            };
+            $edit.on('click', () => {
+                $input.val(currentChoices[index]);
+                refreshApplyState();
+                setEditing(true);
+            });
+
+            $apply.on('click', () => {
+                const draft = String($input.val() ?? '');
+                if (!draft.trim()) return;
+                currentChoices[index] = draft;
+                renderPreview();
+                setEditing(false);
+                $edit.trigger('focus');
+            });
+
+            $reset.on('click', () => {
+                $input.val('');
+                setEditing(false);
+                $edit.trigger('focus');
+            });
+
+            const $actions = $('<div class="next-choices-edit-actions"></div>');
+            $actions.append($apply, $reset);
+            $editor.append($input, $actions);
+            $row.append($select, $btn, $edit, $editor);
+            $list.append($row);
+            rowRefs.push({ $row, $btn, $edit, $select, $checkbox });
+        });
+
+        const toolbar = makeToolbar(() => {
+            if (enhancementBusy || combinationOpen || combinationBusy) return;
+            setPanelOpen(!$panelWrap.is(':visible'));
+        }, generationGuidance, () => setCombinationOpen(!combinationOpen));
+
+        const $panelWrap = $('<div class="next-choices-guidance-wrap"></div>').hide();
+        const $panel = $('<div class="next-choices-guidance" id="next_choices_guidance_panel"></div>');
+        const $panelLabel = $('<label for="next_choices_guidance_input"></label>').text(tr('Enhancement prompt'));
+        const $guidanceInput = $('<textarea id="next_choices_guidance_input" class="text_pole next-choices-guidance-input" rows="3"></textarea>');
+        const $panelHint = $('<div class="next-choices-guidance-hint"></div>')
+            .text(tr("Keeps each choice's main content and adds your direction."));
+        $guidanceInput.on('keydown', (event) => event.stopPropagation());
+
+        const $status = $('<div class="next-choices-guidance-status" role="status" aria-live="polite"></div>');
+        const setStatus = (message) => { $status.text(message ?? ''); };
+
+        const $submit = $('<button type="button" class="next-choices-tool next-choices-guidance-submit"></button>')
+            .text(tr('Enhance choices'));
+        const $stopEnhance = $('<button type="button" class="next-choices-tool next-choices-enhance-stop"></button>')
+            .text(tr('Stop enhancing'))
+            .hide();
+        let enhancementRequestId = null;
+        $stopEnhance.on('click', () => {
+            if (!enhancementBusy || enhancementRequestId !== requestId || !isViewCurrent()) return;
+            abortPending();
+            setBusy(false);
+            $guidanceInput.trigger('focus');
+        });
+
+        function placeholderExemplars() {
+            const ctx = getContext();
+            const name = (ctx?.name1 || '').trim();
+            if (!name) return tr('e.g. reassure her');
+            return tr('e.g. have {name} reassure her').replaceAll('{name}', name);
+        }
+
+        const $panelClose = $('<button type="button" class="next-choices-tool next-choices-guidance-close"></button>')
+            .text(tr('Close'));
+
+        const setPanelControlsDisabled = (disabled) => {
+            $guidanceInput.prop('disabled', disabled);
+            $submit.prop('disabled', disabled);
+            $panelClose.prop('disabled', disabled);
+        };
+
+        const refreshGuidanceAvailability = () => {
+            const hasGuidance = String($guidanceInput.val() ?? '').trim().length > 0;
+            const editing = openEditors > 0;
+            const busy = enhancementBusy || combinationBusy;
+            $submit.prop('disabled', busy || combinationOpen || !hasGuidance || editing);
+            if (editing) {
+                setStatus(tr('Apply or reset your edits before enhancing choices.'));
+            } else if (!busy) {
+                setStatus('');
+            }
+        };
+        $guidanceInput.on('input', refreshGuidanceAvailability);
+
+        const setPanelOpen = (open) => {
+            if (open) {
+                $panelWrap.show();
+                $guidanceInput.attr('placeholder', placeholderExemplars());
+                toolbar.$enhance.attr('aria-expanded', 'true');
+                $guidanceInput.trigger('focus');
+            } else {
+                $panelWrap.hide();
+                toolbar.$enhance.attr('aria-expanded', 'false');
+                toolbar.$enhance.trigger('focus');
+            }
+        };
+        $panelClose.on('click', () => {
+            if (!enhancementBusy) setPanelOpen(false);
+        });
+
+        const setBusy = (busy) => {
+            enhancementBusy = busy;
+            setRowsInteractive(!busy);
+            $list.toggleClass('next-choices-list-locked', busy);
+            toolbar.$enhance.prop('disabled', busy || combinationOpen || combinationBusy);
+            $panel.attr('aria-busy', busy ? 'true' : 'false');
+            setPanelControlsDisabled(busy);
+            $stopEnhance.toggle(busy);
+            refreshCombinationAvailability();
+            if (busy) {
+                setStatus(tr('Enhancing choices…'));
+            } else {
+                refreshGuidanceAvailability();
+            }
+        };
+
+        const isViewCurrent = () => document.getElementById(CONTAINER_ID) === $container[0]
+            && $content.parent()[0] === $container[0]
+            && $container.children()[0] === $content[0];
+
+        const setRowsInteractive = (interactive) => {
+            for (const row of rowRefs) {
+                row.$btn.prop('disabled', !interactive);
+                row.$checkbox.prop('disabled', !interactive);
+                row.$edit.prop('disabled', !interactive || combinationOpen);
+            }
+        };
+
+        const enhanceDisplayedChoices = async () => {
+            if (enhancementBusy || combinationOpen || combinationBusy) return;
+            if (!isViewCurrent() || !getSettings().enabled) return;
+
+            const guidance = String($guidanceInput.val() ?? '').trim();
+            if (!guidance) return;
+
+            const ctx = getContext();
+            if (!ctx || !getLastMessage(ctx)) {
+                setStatus(tr('No conversation is available to enhance these choices.'));
+                return;
+            }
+            if (openEditors > 0) {
+                refreshGuidanceAvailability();
+                return;
+            }
+
+            const originals = currentChoices.slice();
+            const settings = { ...getSettings() };
+
+            clearTimeout(autoGenerateTimer);
+            abortPending();
+            const myRequestId = requestId;
+            enhancementRequestId = myRequestId;
+            const requestController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            abortController = requestController;
+            generating = true;
+            setBusy(true);
+
+            let response;
+            try {
+                const prompt = buildEnhancementPrompt(ctx, settings, originals, guidance);
+                response = await sendRawRequest(ctx, settings, prompt, requestController?.signal, myRequestId);
+            } catch (err) {
+                if (myRequestId !== requestId) return;
+                generating = false;
+                if (!isViewCurrent()) return;
+                setBusy(false);
+                console.error(`[${MODULE_NAME}] Enhancement failed:`, err);
+                setStatus(tr('Failed to enhance choices: ') + (err?.message ?? String(err)));
+                return;
+            }
+
+            if (myRequestId !== requestId) return;
+            generating = false;
+
+            if (!isViewCurrent()) return;
+
+            const enhanced = parseRewrittenChoices(response, originals.length);
+            if (!enhanced) {
+                setBusy(false);
+                setStatus(tr('Could not parse one enhanced choice for every original choice. Try again.'));
+                return;
+            }
+
+            renderChoices(enhanced, generationGuidance);
+            const $newEnhance = $(`#${CONTAINER_ID} .next-choices-enhance`).first();
+            if ($newEnhance.length) $newEnhance.trigger('focus');
+        };
+
+        $submit.on('click', () => enhanceDisplayedChoices());
+
+        const $panelActions = $('<div class="next-choices-guidance-actions"></div>');
+        $panelActions.append($submit, $stopEnhance, $panelClose);
+        $panelWrap.append($panel, $status);
+        $panel.append($panelLabel, $guidanceInput, $panelHint, $panelActions);
+
+        const $combinationWrap = $('<div class="next-choices-combine-wrap"></div>').hide();
+        const $combinationPanel = $('<div id="next_choices_combine_panel" class="next-choices-combine-panel"></div>');
+        const $combinationHint = $('<div class="next-choices-combine-hint"></div>')
+            .text(tr('Select at least two choices to combine.'));
+        const $combineSubmit = $('<button type="button" class="next-choices-tool next-choices-combine-submit"></button>')
+            .text(tr('Combine selected'))
+            .prop('disabled', true);
+        const $combineStop = $('<button type="button" class="next-choices-tool next-choices-combine-stop"></button>')
+            .text(tr('Stop combining'))
+            .hide();
+        const $combineCancel = $('<button type="button" class="next-choices-tool next-choices-combine-cancel"></button>')
+            .text(tr('Cancel'));
+        const $combineActions = $('<div class="next-choices-combine-actions"></div>');
+        $combineActions.append($combineSubmit, $combineStop, $combineCancel);
+        $combinationPanel.append($combinationHint, $combineActions);
+        const $combineStatus = $('<div class="next-choices-combine-status" role="status" aria-live="polite"></div>');
+        $combinationWrap.append($combinationPanel, $combineStatus);
+        $combineSubmit.add($combineStop).add($combineCancel).on('keydown', (event) => event.stopPropagation());
+        $combineCancel.on('click', () => setCombinationOpen(false));
+
+        const refreshCombinationAvailability = () => {
+            const editing = openEditors > 0;
+            const busy = enhancementBusy || combinationBusy;
+            toolbar.$combine.prop('disabled', busy || editing || currentChoices.length < 2)
+                .attr('title', tr(editing
+                    ? 'Apply or reset your edits before combining choices.'
+                    : currentChoices.length < 2 ? 'Select at least two choices to combine.' : 'Combine choices'));
+            $combineSubmit.prop('disabled', !combinationOpen || busy || editing || selectedChoiceIndexes.size < 2);
+        };
+
+        const toggleCombinationChoice = (index) => {
+            if (!combinationOpen || combinationBusy || !isViewCurrent()) return;
+            if (selectedChoiceIndexes.has(index)) selectedChoiceIndexes.delete(index);
+            else selectedChoiceIndexes.add(index);
+            const selected = selectedChoiceIndexes.has(index);
+            const row = rowRefs[index];
+            row.$checkbox.prop('checked', selected);
+            row.$btn.attr('aria-pressed', String(selected));
+            row.$row.toggleClass('next-choices-row-selected', selected);
+            $combineStatus.text(tr('{count} selected').replaceAll('{count}', String(selectedChoiceIndexes.size)));
+            refreshCombinationAvailability();
+        };
+
+        const setCombinationOpen = (open) => {
+            if (!isViewCurrent() || combinationBusy) return;
+            if (open && (currentChoices.length < 2 || enhancementBusy || openEditors > 0)) return;
+            if (open && $panelWrap.is(':visible')) setPanelOpen(false);
+            combinationOpen = open;
+            selectedChoiceIndexes.clear();
+            $combineStatus.text('');
+            $combinationWrap.toggle(open);
+            toolbar.$combine.attr('aria-expanded', String(open));
+            for (const row of rowRefs) {
+                row.$select.toggle(open);
+                row.$checkbox.prop('checked', false);
+                row.$row.removeClass('next-choices-row-selected');
+                if (open) row.$btn.attr('aria-pressed', 'false');
+                else row.$btn.removeAttr('aria-pressed');
+            }
+            setRowsInteractive(true);
+            toolbar.$enhance.prop('disabled', open);
+            refreshGuidanceAvailability();
+            refreshCombinationAvailability();
+            if (open) rowRefs[0].$checkbox.trigger('focus');
+            else toolbar.$combine.trigger('focus');
+        };
+
+        const setCombinationBusy = (busy) => {
+            combinationBusy = busy;
+            setRowsInteractive(!busy);
+            $list.toggleClass('next-choices-list-locked', busy);
+            toolbar.$enhance.prop('disabled', busy || combinationOpen);
+            setPanelControlsDisabled(busy);
+            $combinationPanel.attr('aria-busy', String(busy));
+            $combineCancel.prop('disabled', busy);
+            $combineStop.toggle(busy);
+            refreshGuidanceAvailability();
+            refreshCombinationAvailability();
+            if (busy) {
+                $combineStatus.text(tr('Combining choices…'));
+                $combineStop.trigger('focus');
+            } else {
+                $combineStatus.text(tr('{count} selected').replaceAll('{count}', String(selectedChoiceIndexes.size)));
+            }
+        };
+
+        const combineDisplayedChoices = async () => {
+            if (!getSettings().enabled || !isViewCurrent() || !combinationOpen
+                || enhancementBusy || combinationBusy || openEditors > 0) return;
+            const selectedIndexes = [...selectedChoiceIndexes]
+                .filter((index) => Number.isInteger(index) && index >= 0 && index < currentChoices.length)
+                .sort((a, b) => a - b);
+            if (selectedIndexes.length < 2) return;
+            const ctx = getContext();
+            if (!ctx || !getLastMessage(ctx)) {
+                $combineStatus.text(tr('No conversation is available to combine these choices.'));
+                return;
+            }
+
+            const originals = currentChoices.slice();
+            const selectedChoices = selectedIndexes.map((index) => originals[index]);
+            const settings = { ...getSettings() };
+            clearTimeout(autoGenerateTimer);
+            abortPending();
+            const myRequestId = requestId;
+            combinationRequestId = myRequestId;
+            const requestController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            abortController = requestController;
+            generating = true;
+            setCombinationBusy(true);
+
+            let response;
+            try {
+                const prompt = buildCombinationPrompt(ctx, settings, selectedChoices);
+                response = await sendRawRequest(ctx, settings, prompt, requestController?.signal, myRequestId);
+            } catch (err) {
+                if (myRequestId !== requestId) return;
+                generating = false;
+                if (!isViewCurrent()) return;
+                setCombinationBusy(false);
+                console.error(`[${MODULE_NAME}] Combination failed:`, err);
+                $combineStatus.text(tr('Failed to combine choices: ') + (err?.message ?? String(err)));
+                $combineSubmit.trigger('focus');
+                return;
+            }
+
+            if (myRequestId !== requestId) return;
+            generating = false;
+            if (!isViewCurrent()) return;
+            const rewritten = parseRewrittenChoices(response, 1);
+            if (!rewritten) {
+                setCombinationBusy(false);
+                $combineStatus.text(tr('Could not parse one combined choice. Try again.'));
+                $combineSubmit.trigger('focus');
+                return;
+            }
+
+            const insertionIndex = selectedIndexes[0];
+            const selected = new Set(selectedIndexes);
+            const nextChoices = [];
+            originals.forEach((choice, index) => {
+                if (index === insertionIndex) nextChoices.push(rewritten[0]);
+                else if (!selected.has(index)) nextChoices.push(choice);
+            });
+            renderChoices(nextChoices, generationGuidance);
+            $(`#${CONTAINER_ID} .next-choices-item`).eq(insertionIndex).trigger('focus');
+        };
+
+        $combineSubmit.on('click', () => combineDisplayedChoices());
+        $combineStop.on('click', () => {
+            if (!combinationBusy || combinationRequestId !== requestId || !isViewCurrent()) return;
+            clearTimeout(autoGenerateTimer);
+            abortPending();
+            setCombinationBusy(false);
+            $combineSubmit.trigger('focus');
+        });
+
+        const $content = $('<div class="next-choices-content"></div>');
+        $content.append($list, $panelWrap, $combinationWrap);
+        $container.append($content, toolbar.$toolbar);
+        refreshGuidanceAvailability();
+        refreshCombinationAvailability();
+    }
+
+    function applyChoice(choiceText) {
+        const settings = getSettings();
+        try {
+            const $ta = $('#send_textarea');
+            if (!$ta.length) return;
+            $ta.val(choiceText);
+            $ta[0].dispatchEvent(new Event('input', { bubbles: true }));
+            clearChoicesUI();
+            if (settings.autoSend) {
+                $('#send_but').trigger('click');
+            } else {
+                $ta.trigger('focus');
+            }
+        } catch (err) {
+            console.error(`[${MODULE_NAME}] Failed to apply choice:`, err);
+        }
+    }
+
+    function getSettingsHtmlFallback() {
+        return `<div class="next-choices-settings"><p>${tr('Failed to load the Next Choices settings panel.')}</p></div>`;
+    }
+
+    function getExtensionBaseUrl() {
+        return 'scripts/extensions/third-party/next-choices';
+    }
+
+    async function loadSettingsHtml() {
+        try {
+            const response = await fetch(`${getExtensionBaseUrl()}/settings.html`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return await response.text();
+        } catch (err) {
+            console.error(`[${MODULE_NAME}] Failed to load settings.html:`, err);
+            return getSettingsHtmlFallback();
+        }
+    }
+
+    function getConnectionProfiles(ctx) {
+        const profiles = ctx?.extensionSettings?.connectionManager?.profiles;
+        return Array.isArray(profiles) ? profiles : [];
+    }
+
+    function rebuildProfileDropdown() {
+        const ctx = getContext();
+        const settings = getSettings();
+        const $select = $('#next_choices_profile');
+        if (!$select.length) return;
+
+        const hasCMRS = !!ctx?.ConnectionManagerRequestService?.sendRequest;
+        $select.empty();
+        $select.append($('<option value="current"></option>').text(tr('Current connection settings')));
+
+        if (hasCMRS) {
+            for (const profile of getConnectionProfiles(ctx)) {
+                if (!profile?.id) continue;
+                $select.append(
+                    $('<option></option>').attr('value', profile.id).text(profile.name ?? profile.id),
+                );
+            }
+            $('#next_choices_no_cm_hint').hide();
+        } else {
+            $('#next_choices_no_cm_hint').show();
+        }
+
+        if ($select.find(`option[value="${CSS?.escape ? CSS.escape(settings.profileId) : settings.profileId}"]`).length) {
+            $select.val(settings.profileId);
+        } else {
+            $select.val('current');
+            if (settings.profileId !== 'current') {
+                settings.profileId = 'current';
+                saveSettings();
+            }
+        }
+    }
+
+    function bindSettingsUI() {
+
+        $('#next_choices_enabled').prop('checked', getSettings().enabled);
+        $('#next_choices_auto_generate').prop('checked', getSettings().autoGenerate);
+        $('#next_choices_auto_send').prop('checked', getSettings().autoSend);
+        $('#next_choices_show_quick_generate').prop('checked', getSettings().showQuickGenerateButton);
+        $('#next_choices_num').val(getSettings().numChoices);
+        $('#next_choices_max_tokens').val(getSettings().maxTokens);
+        $('#next_choices_history_depth').val(getSettings().historyDepth);
+        $('#next_choices_prompt').val(getSettings().promptTemplate);
+        rebuildProfileDropdown();
+
+        $('#next_choices_enabled').on('change', function () {
+            const enabled = !!$(this).prop('checked');
+            getSettings().enabled = enabled;
+            saveSettings();
+            clearTimeout(autoGenerateTimer);
+            abortPending();
+            clearChoicesUI();
+            $(`#${WAND_BUTTON_ID}, #${GUIDED_WAND_BUTTON_ID}`).toggle(enabled);
+            updateQuickGenerateButton();
+        });
+        $('#next_choices_auto_generate').on('change', function () {
+            getSettings().autoGenerate = !!$(this).prop('checked');
+            saveSettings();
+            clearTimeout(autoGenerateTimer);
+            abortPending();
+            clearChoicesUI();
+        });
+        $('#next_choices_auto_send').on('change', function () {
+            getSettings().autoSend = !!$(this).prop('checked');
+            saveSettings();
+        });
+        $('#next_choices_show_quick_generate').on('change', function () {
+            getSettings().showQuickGenerateButton = !!$(this).prop('checked');
+            saveSettings();
+            updateQuickGenerateButton();
+        });
+        $('#next_choices_profile').on('change', function () {
+            getSettings().profileId = normalizeProfileId($(this).val());
+            saveSettings();
+        });
+        $('#next_choices_num').on('input change', function () {
+            getSettings().numChoices = normalizeNumChoices($(this).val());
+            saveSettings();
+        });
+        $('#next_choices_max_tokens').on('input change', function () {
+            getSettings().maxTokens = normalizeMaxTokens($(this).val());
+            saveSettings();
+        });
+        $('#next_choices_history_depth').on('input change', function () {
+            getSettings().historyDepth = normalizeHistoryDepth($(this).val());
+            saveSettings();
+        });
+        $('#next_choices_prompt').on('input change', function () {
+            getSettings().promptTemplate = normalizePromptTemplate($(this).val());
+            saveSettings();
+        });
+        $('#next_choices_prompt_reset').on('click', function () {
+            getSettings().promptTemplate = DEFAULT_PROMPT_TEMPLATE;
+            $('#next_choices_prompt').val(DEFAULT_PROMPT_TEMPLATE);
+            saveSettings();
+        });
+
+        $('#next_choices_settings_drawer .inline-drawer-toggle').on('click', () => {
+            setTimeout(rebuildProfileDropdown, 0);
+        });
+    }
+
+    function applyI18nToPanel($panel) {
+        try {
+            const ctx = getContext();
+            if (typeof ctx?.translate !== 'function') return;
+            $panel.find('[data-i18n]').addBack('[data-i18n]').each(function () {
+                const spec = this.getAttribute('data-i18n');
+                if (!spec) return;
+                for (const part of spec.split(';')) {
+                    try {
+                        const attrMatch = part.match(/^\[(.+?)\](.+)$/);
+                        if (attrMatch) {
+                            const translated = ctx.translate(attrMatch[2]);
+                            if (typeof translated === 'string') this.setAttribute(attrMatch[1], translated);
+                        } else {
+                            const translated = ctx.translate(part);
+                            if (typeof translated === 'string') this.textContent = translated;
+                        }
+                    } catch { }
+                }
+            });
+        } catch (err) {
+            console.warn(`[${MODULE_NAME}] applyI18nToPanel failed:`, err);
+        }
+    }
+
+    async function initSettingsPanel() {
+        const html = await loadSettingsHtml();
+        const $target = $('#extensions_settings2').length
+            ? $('#extensions_settings2')
+            : $('#extensions_settings');
+        if (!$target.length) {
+            console.warn(`[${MODULE_NAME}] No extensions settings container found.`);
+            return;
+        }
+        const $panel = $(html);
+        $target.append($panel);
+        applyI18nToPanel($panel);
+        bindSettingsUI();
+    }
+
+    function addWandMenuItem({ id, icon, label, onClick, visible, controls = null }) {
+        let $item = $(`#${id}`).first();
+        if (!$item.length) {
+            let $menu = $('#extensionsMenu');
+            if (!$menu.length) $menu = $('#extensions_menu');
+            if (!$menu.length) {
+                console.warn(`[${MODULE_NAME}] Wand menu container not found; ${id} not added.`);
+                return null;
+            }
+            $item = $(`<div id="${id}" class="list-group-item flex-container flexGap5 interactable" tabindex="0"></div>`);
+            $item.append(`<div class="fa-solid ${icon} extensionsMenuExtensionButton"></div>`);
+            $item.append($('<span></span>').text(label));
+            $item.on('click', () => onClick($item[0]));
+            $menu.append($item);
+        }
+        if (controls) {
+            $item.attr('aria-controls', controls);
+            if (typeof $item.attr('aria-expanded') === 'undefined') $item.attr('aria-expanded', 'false');
+        }
+        $item.toggle(!!visible);
+        return $item;
+    }
+
+    function addWandMenuButton() {
+        const enabled = !!getSettings().enabled;
+        addWandMenuItem({
+            id: WAND_BUTTON_ID,
+            icon: 'fa-dice',
+            label: tr('Generate Choices'),
+            onClick: () => generateChoices('manual'),
+            visible: enabled,
+        });
+        addWandMenuItem({
+            id: GUIDED_WAND_BUTTON_ID,
+            icon: 'fa-compass',
+            label: tr('Generate choices (guided)'),
+            onClick: (opener) => setGenerationGuidanceOpen(!generationGuidanceUi?.open, opener),
+            visible: enabled,
+            controls: GUIDANCE_WRAPPER_ID,
+        });
+        syncGenerationGuidanceAria();
+    }
+
+    const WAND_BUTTON_ID = 'next_choices_wand_button';
+    const QUICK_BUTTON_ID = 'next_choices_quick_generate';
+    const QUICK_ROW_ID = 'next_choices_quick_actions';
+    const QUICK_HOST_CLASS = 'next-choices-quick-host';
+    const GUIDED_BUTTON_ID = 'next_choices_guided_generate';
+    const GUIDED_WAND_BUTTON_ID = 'next_choices_guided_wand_button';
+    const GUIDANCE_WRAPPER_ID = 'next_choices_generation_guidance';
+    const GUIDANCE_PANEL_ID = 'next_choices_generation_guidance_panel';
+    const GUIDANCE_INPUT_ID = 'next_choices_theme_input';
+    const QUICK_IMPERSONATE_SELECTOR =
+        '#gg_impersonate_button, #gg_impersonate_button_2nd, #gg_impersonate_button_3rd';
+    const QUICK_WATCH_SELECTOR = [
+        '#send_form',
+        '#nonQRFormItems',
+        '#gg-action-button-container',
+        '#gg-regular-buttons-container',
+        `#${QUICK_ROW_ID}`,
+        `#${QUICK_BUTTON_ID}`,
+        `#${GUIDED_BUTTON_ID}`,
+        `#${GUIDANCE_WRAPPER_ID}`,
+    ].join(', ');
+
+    let quickGenerateObserver = null;
+    let quickGenerateButton = null;
+    let guidedGenerateButton = null;
+    let quickGenerateRow = null;
+    let quickGenerateMarkedHost = null;
+
+    let generationGuidanceUi = null;
+
+    function isRendered(node) {
+        return node instanceof HTMLElement && node.isConnected && node.getClientRects().length > 0;
+    }
+
+    function syncGenerationGuidanceAria() {
+        const open = generationGuidanceUi?.open ? 'true' : 'false';
+        guidedGenerateButton?.setAttribute('aria-expanded', open);
+        document.getElementById(GUIDED_WAND_BUTTON_ID)?.setAttribute('aria-expanded', open);
+    }
+
+    function refreshGuidanceSubmitState() {
+        const ui = generationGuidanceUi;
+        if (!ui) return;
+        const hasTheme = String(ui.$input.val() ?? '').trim().length > 0;
+        ui.$submit.prop('disabled', ui.busy || !hasTheme);
+    }
+
+    function createGenerationGuidanceUI() {
+        const $wrapper = $(`<div id="${GUIDANCE_WRAPPER_ID}" class="next-choices-guidance-wrap"></div>`).hide();
+        const $panel = $(`<div class="next-choices-guidance" id="${GUIDANCE_PANEL_ID}"></div>`);
+        const $label = $(`<label for="${GUIDANCE_INPUT_ID}"></label>`).text(tr('Choice theme'));
+        const $input = $(`<textarea id="${GUIDANCE_INPUT_ID}" class="text_pole next-choices-guidance-input" rows="3"></textarea>`)
+            .attr('placeholder', tr('e.g. invite her to dance'));
+        const $hint = $('<div class="next-choices-guidance-hint"></div>')
+            .text(tr("Use one main theme while keeping each choice's tone and approach from your prompt template."));
+        const $actions = $('<div class="next-choices-guidance-actions"></div>');
+        const $submit = $('<button type="button" class="next-choices-tool next-choices-guidance-submit"></button>')
+            .text(tr('Generate choices (guided)'));
+        const $close = $('<button type="button" class="next-choices-tool next-choices-guidance-close"></button>')
+            .text(tr('Close'));
+        const $status = $('<div class="next-choices-guidance-status" role="status" aria-live="polite"></div>');
+
+        $actions.append($submit, $close);
+        $panel.append($label, $input, $hint, $actions);
+        $wrapper.append($panel, $status);
+
+        $input.on('keydown', (event) => event.stopPropagation());
+        $input.on('input', refreshGuidanceSubmitState);
+
+        const ui = {
+            $wrapper,
+            $panel,
+            $input,
+            $submit,
+            $close,
+            $status,
+            open: false,
+            busy: false,
+            opener: null,
+        };
+
+        $submit.on('click', () => {
+            if (ui !== generationGuidanceUi || ui.busy) return;
+            const theme = String($input.val() ?? '').trim();
+            if (!theme) return;
+            const ctx = getContext();
+            if (!ctx || !getLastMessage(ctx)) {
+                ui.$status.text(tr('No conversation is available to generate choices.'));
+                return;
+            }
+            generateChoices('guided', theme);
+        });
+        $close.on('click', () => setGenerationGuidanceOpen(false));
+
+        return ui;
+    }
+
+    function getGenerationGuidanceUI() {
+        if (!generationGuidanceUi) {
+            generationGuidanceUi = createGenerationGuidanceUI();
+            if (getSettings().enabled) startQuickGenerateObserver();
+        }
+        syncGenerationGuidanceUI();
+        return generationGuidanceUi;
+    }
+
+    function syncGenerationGuidanceUI() {
+        const ui = generationGuidanceUi;
+        if (!ui) return;
+
+        const sendForm = document.getElementById('send_form');
+        if (!sendForm) return;
+
+        const wrapper = ui.$wrapper[0];
+        const duplicate = document.getElementById(GUIDANCE_WRAPPER_ID);
+        if (duplicate && duplicate !== wrapper) duplicate.remove();
+
+        let host = null;
+        for (const id of ['gg-action-button-container', QUICK_ROW_ID, 'nonQRFormItems']) {
+            const candidate = document.getElementById(id);
+            if (candidate && candidate.parentElement === sendForm) {
+                host = candidate;
+                break;
+            }
+        }
+
+        const placed = wrapper.parentElement === sendForm && wrapper.nextElementSibling === host;
+        if (!placed) {
+            if (host) sendForm.insertBefore(wrapper, host);
+            else sendForm.appendChild(wrapper);
+        }
+
+        const order = host ? getComputedStyle(host).order : '25';
+        if (wrapper.style.order !== order) wrapper.style.order = order;
+    }
+
+    function setGenerationGuidanceOpen(open, opener = null) {
+        const ui = getGenerationGuidanceUI();
+        const wrapper = ui.$wrapper[0];
+
+        if (!open) {
+            const focusInside = wrapper.contains(document.activeElement);
+            ui.$wrapper.hide();
+            ui.open = false;
+            syncGenerationGuidanceAria();
+            if (focusInside) restoreGenerationGuidanceFocus(ui);
+            return true;
+        }
+
+        if (opener instanceof Element) ui.opener = opener;
+        if (!wrapper.isConnected) return false;
+        ui.$wrapper.show();
+        ui.open = true;
+        syncGenerationGuidanceAria();
+        refreshGuidanceSubmitState();
+        ui.$input.trigger('focus');
+        return true;
+    }
+
+    function restoreGenerationGuidanceFocus(ui) {
+        const candidates = [ui.opener, document.getElementById(GUIDED_BUTTON_ID), document.getElementById('send_textarea')];
+        for (const candidate of candidates) {
+            if (isRendered(candidate)) {
+                candidate.focus();
+                return;
+            }
+        }
+    }
+
+    function restoreFocusAfterGenerationStop(target) {
+        const launchers = [
+            document.getElementById(WAND_BUTTON_ID),
+            document.getElementById(QUICK_BUTTON_ID),
+            document.getElementById(GUIDED_BUTTON_ID),
+            document.getElementById(GUIDED_WAND_BUTTON_ID),
+        ];
+        const sendForm = document.getElementById('send_form');
+        const targetIsInComposerOrLauncher = !!target
+            && (launchers.includes(target) || !!sendForm?.contains(target));
+        const candidates = targetIsInComposerOrLauncher ? [target, ...launchers] : launchers;
+        candidates.push(document.getElementById('send_textarea'), document.getElementById('send_but'));
+        for (const candidate of candidates) {
+            if (candidate && candidate !== document.body && isRendered(candidate) && !candidate.disabled) {
+                candidate.focus();
+                return;
+            }
+        }
+    }
+
+    function setGenerationGuidanceBusy(busy) {
+        const ui = generationGuidanceUi;
+        if (!ui) return;
+        ui.busy = !!busy;
+        ui.$panel.attr('aria-busy', ui.busy ? 'true' : 'false');
+        ui.$input.prop('disabled', ui.busy);
+        ui.$status.text(ui.busy ? tr('Generating choices…') : '');
+        refreshGuidanceSubmitState();
+    }
+
+    function resetGenerationGuidanceUI() {
+        const ui = generationGuidanceUi;
+        generationGuidanceUi = null;
+        if (ui) {
+            ui.$input.val('');
+            ui.$wrapper.remove();
+        } else {
+            document.getElementById(GUIDANCE_WRAPPER_ID)?.remove();
+        }
+        syncGenerationGuidanceAria();
+    }
+
+    function quickGenerateWanted() {
+        const settings = getSettings();
+        return !!settings.enabled && !!settings.showQuickGenerateButton;
+    }
+
+    function createQuickGenerateButton() {
+        const $button = $('<button></button>')
+            .attr('type', 'button')
+            .attr('id', QUICK_BUTTON_ID)
+            .addClass('next-choices-quick-generate next-choices-tool interactable')
+            .attr('title', tr('Generate choices'))
+            .attr('aria-label', tr('Generate choices'));
+        $button.append('<i class="fa-solid fa-dice" aria-hidden="true"></i>');
+        $button.on('click', () => {
+            if (!quickGenerateWanted()) return;
+            generateChoices('manual');
+        });
+        quickGenerateButton = $button[0];
+        return $button;
+    }
+
+    function createGuidedGenerateButton() {
+        const $button = $('<button></button>')
+            .attr('type', 'button')
+            .attr('id', GUIDED_BUTTON_ID)
+            .addClass('next-choices-quick-generate next-choices-tool interactable')
+            .attr('title', tr('Generate choices (guided)'))
+            .attr('aria-label', tr('Generate choices (guided)'))
+            .attr('aria-controls', GUIDANCE_WRAPPER_ID)
+            .attr('aria-expanded', 'false');
+        $button.append('<i class="fa-solid fa-compass" aria-hidden="true"></i>');
+        $button.on('click', () => {
+            if (!quickGenerateWanted()) return;
+            setGenerationGuidanceOpen(!generationGuidanceUi?.open, $button[0]);
+        });
+        guidedGenerateButton = $button[0];
+        syncGenerationGuidanceAria();
+        return $button;
+    }
+
+    const ownedShortcutIds = new Set();
+
+    function resolveOwnedButton(id, owned, create) {
+        if (owned) {
+            for (const node of document.querySelectorAll(`#${id}`)) {
+                if (node !== owned) node.remove();
+            }
+            return $(owned);
+        }
+
+        const found = document.querySelectorAll(`#${id}`);
+        if (found.length && !ownedShortcutIds.has(id)) {
+            for (let i = 1; i < found.length; i++) found[i].remove();
+            return $(found[0]);
+        }
+        for (const node of found) node.remove();
+        const $button = create();
+        ownedShortcutIds.add(id);
+        return $button;
+    }
+
+    function syncQuickGenerateButton() {
+        if (!quickGenerateWanted()) return;
+
+        const sendForm = document.getElementById('send_form');
+        if (!sendForm) return;
+
+        const $dice = resolveOwnedButton(QUICK_BUTTON_ID, quickGenerateButton, createQuickGenerateButton);
+        const $compass = resolveOwnedButton(GUIDED_BUTTON_ID, guidedGenerateButton, createGuidedGenerateButton);
+        const dice = $dice[0];
+        const compass = $compass[0];
+        quickGenerateButton = dice;
+        guidedGenerateButton = compass;
+        syncGenerationGuidanceAria();
+
+        const regularHost = document.getElementById('gg-regular-buttons-container');
+        if (regularHost && sendForm.contains(regularHost)) {
+            const actionHost = document.getElementById('gg-action-button-container');
+            if (actionHost && !actionHost.classList.contains(QUICK_HOST_CLASS)) {
+                actionHost.classList.add(QUICK_HOST_CLASS);
+            }
+            quickGenerateMarkedHost = actionHost;
+
+            const reference = Array.from(regularHost.children)
+                .find((child) => child.matches(QUICK_IMPERSONATE_SELECTOR)) ?? null;
+            const placed = dice.parentElement === regularHost
+                && dice.nextElementSibling === compass
+                && (reference
+                    ? compass.nextElementSibling === reference
+                    : regularHost.firstElementChild === dice);
+            if (!placed) {
+                regularHost.insertBefore(compass, reference ?? regularHost.firstElementChild);
+                regularHost.insertBefore(dice, compass);
+            }
+
+            detachOwnedRow();
+            syncGenerationGuidanceUI();
+            return;
+        }
+
+        clearMarkedHost();
+
+        let row = quickGenerateRow?.isConnected ? quickGenerateRow : null;
+        if (!row) row = document.getElementById(QUICK_ROW_ID);
+        if (!row) {
+            row = document.createElement('div');
+            row.id = QUICK_ROW_ID;
+            const nonQR = document.getElementById('nonQRFormItems');
+            if (nonQR && nonQR.parentElement === sendForm) {
+                sendForm.insertBefore(row, nonQR.nextSibling);
+            } else {
+                sendForm.appendChild(row);
+            }
+        }
+        quickGenerateRow = row;
+        if (dice.parentElement !== row || dice.nextElementSibling !== compass) {
+            row.appendChild(dice);
+            row.appendChild(compass);
+        }
+        syncGenerationGuidanceUI();
+    }
+
+    function removeQuickGenerateButton() {
+        quickGenerateButton?.remove();
+        quickGenerateButton = null;
+        guidedGenerateButton?.remove();
+        guidedGenerateButton = null;
+        detachOwnedRow();
+        clearMarkedHost();
+        document.getElementById(QUICK_BUTTON_ID)?.remove();
+        document.getElementById(GUIDED_BUTTON_ID)?.remove();
+    }
+
+    function detachOwnedRow() {
+        quickGenerateRow?.remove();
+        quickGenerateRow = null;
+        document.getElementById(QUICK_ROW_ID)?.remove();
+    }
+
+    function clearMarkedHost() {
+        quickGenerateMarkedHost?.classList.remove(QUICK_HOST_CLASS);
+        quickGenerateMarkedHost = null;
+        document.getElementById('gg-action-button-container')?.classList.remove(QUICK_HOST_CLASS);
+    }
+
+    function mutationTouchesQuickHosts(record) {
+        if (record.target instanceof Element && record.target.matches(QUICK_WATCH_SELECTOR)) return true;
+        if (record.target instanceof Element && record.target.closest('#chat')) return false;
+        const touches = (node) => node instanceof Element
+            && (node.matches(QUICK_WATCH_SELECTOR) || !!node.querySelector(QUICK_WATCH_SELECTOR));
+        for (const node of record.addedNodes) if (touches(node)) return true;
+        for (const node of record.removedNodes) if (touches(node)) return true;
+        return false;
+    }
+
+    function onComposerMutations(records) {
+        if (!quickGenerateWanted() && !generationGuidanceUi) {
+            updateQuickGenerateButton();
+            return;
+        }
+        for (const record of records) {
+            if (mutationTouchesQuickHosts(record)) {
+                updateQuickGenerateButton();
+                return;
+            }
+        }
+    }
+
+    function startQuickGenerateObserver() {
+        if (quickGenerateObserver || typeof MutationObserver !== 'function') return;
+        quickGenerateObserver = new MutationObserver(onComposerMutations);
+        quickGenerateObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    function stopQuickGenerateObserver() {
+        quickGenerateObserver?.disconnect();
+        quickGenerateObserver = null;
+    }
+
+    function updateQuickGenerateButton() {
+        const settings = getSettings();
+        if (!settings.enabled) resetGenerationGuidanceUI();
+
+        if (quickGenerateWanted()) {
+            syncQuickGenerateButton();
+        } else {
+            removeQuickGenerateButton();
+        }
+        if (generationGuidanceUi) syncGenerationGuidanceUI();
+
+        if (settings.enabled && (quickGenerateWanted() || generationGuidanceUi)) {
+            startQuickGenerateObserver();
+        } else {
+            stopQuickGenerateObserver();
+        }
+    }
+
+    let autoGenerateTimer = null;
+
+    function onCharacterMessageRendered() {
+        const settings = getSettings();
+        if (!settings.enabled || !settings.autoGenerate) return;
+        clearTimeout(autoGenerateTimer);
+        autoGenerateTimer = setTimeout(() => {
+            const current = getSettings();
+            if (current.enabled && current.autoGenerate) generateChoices('auto');
+        }, 300);
+    }
+
+    function onGenerationStarted() {
+        clearTimeout(autoGenerateTimer);
+        abortPending();
+        clearChoicesUI();
+        resetGenerationGuidanceUI();
+    }
+
+    function onChatStateChanged() {
+        clearTimeout(autoGenerateTimer);
+        abortPending();
+        clearChoicesUI();
+        resetGenerationGuidanceUI();
+    }
+
+    function onMessageSwiped() {
+        onChatStateChanged();
+        const settings = getSettings();
+        if (settings.enabled && settings.autoGenerate) {
+            autoGenerateTimer = setTimeout(() => {
+                const current = getSettings();
+                if (current.enabled && current.autoGenerate) generateChoices('auto');
+            }, 300);
+        }
+    }
+
+    function wireEvents(ctx) {
+        const eventSource = ctx?.eventSource;
+        const types = ctx?.eventTypes ?? ctx?.event_types ?? {};
+        if (!eventSource?.on) {
+            console.warn(`[${MODULE_NAME}] eventSource unavailable; events not wired.`);
+            return;
+        }
+
+        const bind = (typeName, handler) => {
+            const eventName = types[typeName];
+            if (eventName) eventSource.on(eventName, handler);
+        };
+
+        bind('CHARACTER_MESSAGE_RENDERED', onCharacterMessageRendered);
+        bind('GENERATION_STARTED', onGenerationStarted);
+        bind('CHAT_CHANGED', onChatStateChanged);
+        bind('MESSAGE_SWIPED', onMessageSwiped);
+        bind('MESSAGE_EDITED', onChatStateChanged);
+        bind('MESSAGE_DELETED', onChatStateChanged);
+    }
+
+    function init() {
+        const ctx = getContext();
+        if (!ctx) {
+            console.error(`[${MODULE_NAME}] SillyTavern context unavailable; extension disabled.`);
+            return;
+        }
+        try {
+            getSettings();
+            wireEvents(ctx);
+            initSettingsPanel().catch((err) =>
+                console.error(`[${MODULE_NAME}] Settings panel init failed:`, err));
+            addWandMenuButton();
+            updateQuickGenerateButton();
+            console.log(`[${MODULE_NAME}] Extension loaded.`);
+        } catch (err) {
+            console.error(`[${MODULE_NAME}] Init failed:`, err);
+        }
+    }
+
+    if (typeof jQuery === 'function') {
+        jQuery(() => init());
+    } else {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    }
+})();
