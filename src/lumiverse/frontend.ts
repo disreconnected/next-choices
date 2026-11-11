@@ -136,8 +136,31 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
     function focusComposer(): void {
         try {
-            ctx.composer?.focus();
+            if (ctx.composer) ctx.composer.focus();
+            else findComposerTextarea()?.focus();
         } catch {}
+    }
+
+    // Fallback for hosts without ctx.composer (composer-v1): drive the chat textarea directly.
+    function findComposerTextarea(): HTMLTextAreaElement | null {
+        return document.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]');
+    }
+
+    function fillTextareaFallback(textarea: HTMLTextAreaElement, text: string): void {
+        // Use the native setter so React's controlled textarea sees the change.
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(textarea, text);
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    async function sendTextareaFallback(textarea: HTMLTextAreaElement): Promise<void> {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        let button: HTMLButtonElement | null = null;
+        for (let el = textarea.parentElement; el && !button; el = el.parentElement) {
+            button = el.querySelector<HTMLButtonElement>('[class*="sendBtnShell"] > button');
+        }
+        if (!button) throw new Error('send button not found');
+        if (button.disabled) throw Object.assign(new Error('COMPOSER_BUSY'), { code: 'COMPOSER_BUSY' });
+        button.click();
     }
 
     function restoreFocusToLauncher(opener: Element | null): void {
@@ -317,7 +340,24 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     async function applyChoice(text: string): Promise<void> {
         const composer = ctx.composer;
         if (!composer) {
-            choicesUi.renderNotice(tr('The message composer is not available.'));
+            const textarea = findComposerTextarea();
+            if (!textarea) {
+                choicesUi.renderNotice(tr('The message composer is not available.'));
+                return;
+            }
+            fillTextareaFallback(textarea, text);
+            choicesUi.clear();
+            if (!settings.autoSend) {
+                textarea.focus();
+                return;
+            }
+            try {
+                await sendTextareaFallback(textarea);
+            } catch (err) {
+                choicesUi.renderNotice(
+                    isBusyError(err) ? tr('Send failed: chat is busy') : tr('Send failed: ') + errorMessage(err),
+                );
+            }
             return;
         }
         try {

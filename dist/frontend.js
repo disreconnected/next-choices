@@ -2291,8 +2291,30 @@ function setup(ctx) {
   }
   function focusComposer() {
     try {
-      ctx.composer?.focus();
+      if (ctx.composer)
+        ctx.composer.focus();
+      else
+        findComposerTextarea()?.focus();
     } catch {}
+  }
+  function findComposerTextarea() {
+    return document.querySelector('textarea[name="chat-message"]');
+  }
+  function fillTextareaFallback(textarea, text) {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, text);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  async function sendTextareaFallback(textarea) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    let button = null;
+    for (let el = textarea.parentElement;el && !button; el = el.parentElement) {
+      button = el.querySelector('[class*="sendBtnShell"] > button');
+    }
+    if (!button)
+      throw new Error("send button not found");
+    if (button.disabled)
+      throw Object.assign(new Error("COMPOSER_BUSY"), { code: "COMPOSER_BUSY" });
+    button.click();
   }
   function restoreFocusToLauncher(opener) {
     const candidates = [opener, ...quick.elements()];
@@ -2455,7 +2477,22 @@ function setup(ctx) {
   async function applyChoice(text) {
     const composer = ctx.composer;
     if (!composer) {
-      choicesUi.renderNotice(tr("The message composer is not available."));
+      const textarea = findComposerTextarea();
+      if (!textarea) {
+        choicesUi.renderNotice(tr("The message composer is not available."));
+        return;
+      }
+      fillTextareaFallback(textarea, text);
+      choicesUi.clear();
+      if (!settings.autoSend) {
+        textarea.focus();
+        return;
+      }
+      try {
+        await sendTextareaFallback(textarea);
+      } catch (err) {
+        choicesUi.renderNotice(isBusyError(err) ? tr("Send failed: chat is busy") : tr("Send failed: ") + errorMessage(err));
+      }
       return;
     }
     try {
