@@ -46,8 +46,6 @@ describe('parseChoices: JSON array', () => {
     });
 
     test('quirk: the array is sliced from the FIRST "[" to the LAST "]"', () => {
-        // "[1]" in the prose makes the slice "[1]\n[\"a\"]", which is not valid JSON,
-        // and there is no list line to fall back to.
         expect(parseChoices('see [1]\n["a"]', 3)).toEqual([]);
     });
 

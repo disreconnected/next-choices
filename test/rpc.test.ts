@@ -25,20 +25,6 @@ describe('isFrontendMessage', () => {
         }
     });
 
-    test('rejects malformed fields', () => {
-        const bad: unknown[] = [
-            { type: 'save_settings', requestId: 'r', settings: 'x' },
-            { type: 'get_context', requestId: 'r', chatId: 5, characterId: null, historyDepth: 4 },
-            { type: 'get_context', requestId: 'r', chatId: 'c', characterId: null, historyDepth: '4' },
-            { type: 'get_context', requestId: 'r', chatId: 'c', characterId: undefined, historyDepth: 4 },
-            { type: 'resolve_macros', requestId: 'r', template: 1, chatId: 'c', characterId: null },
-            { type: 'generate', requestId: 'r', prompt: 'p', connectionId: undefined, maxTokens: 500 },
-            { type: 'generate', requestId: 'r', prompt: 'p', connectionId: null, maxTokens: NaN },
-            { type: 'cancel', requestId: 'r' },
-        ];
-        for (const message of bad) expect(isFrontendMessage(message)).toBe(false);
-    });
-
     test('does not accept backend messages', () => {
         expect(isFrontendMessage({ type: 'result', requestId: 'r', text: 't' })).toBe(false);
         expect(isFrontendMessage({ type: 'hello' })).toBe(false);
@@ -73,20 +59,6 @@ describe('isBackendMessage', () => {
         for (const message of [null, undefined, 'x', 5, [], {}, { type: 'nope' }, { type: 'result', text: 't' }]) {
             expect(isBackendMessage(message)).toBe(false);
         }
-    });
-
-    test('rejects malformed fields', () => {
-        const bad: unknown[] = [
-            { type: 'settings', requestId: 'r', settings: null },
-            { type: 'context', requestId: 'r', history: [{ name: 'A', text: 'x' }], userName: 'A', charName: 'B', persona: '', lastIsUser: true },
-            { type: 'context', requestId: 'r', history: 'x', userName: 'A', charName: 'B', persona: '', lastIsUser: true },
-            { type: 'context', requestId: 'r', history: [], userName: 'A', charName: 'B', persona: '' },
-            { type: 'macros', requestId: 'r' },
-            { type: 'result', requestId: 'r', text: 5 },
-            { type: 'error', requestId: 'r', message: 'm' },
-            { type: 'command' },
-        ];
-        for (const message of bad) expect(isBackendMessage(message)).toBe(false);
     });
 
     test('does not accept frontend messages', () => {

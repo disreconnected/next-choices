@@ -1,15 +1,4 @@
-/**
- * Stylesheet of the Lumiverse build: a port of style.css onto the host's
- * --lumiverse-* theme variables (every use carries a fallback so the UI stays
- * readable if a variable is missing). The SillyTavern-only blocks
- * (Guided Generations toolbar hosting, #send_form placement, the ST settings
- * drawer) are intentionally left out.
- *
- * Elements are hidden with the `hidden` attribute, so an explicit `display`
- * on any of these classes must never win over it: see the [hidden] rule.
- */
 export const STYLES = `
-/* Next Choices */
 
 #next_choices_container,
 #next_choices_generation_guidance,
@@ -30,7 +19,6 @@ export const STYLES = `
     font-family: var(--lumiverse-font-family, inherit);
 }
 
-/* An explicit display on a class must not override the hidden attribute. */
 #next_choices_container[hidden],
 #next_choices_generation_guidance[hidden],
 .next-choices-container[hidden],
@@ -55,7 +43,6 @@ export const STYLES = `
     gap: 5px;
     flex: 1 1 auto;
     min-width: 0;
-    /* Keep lengthy generated choices from covering the conversation. */
     max-height: min(42vh, 28rem);
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -81,7 +68,6 @@ export const STYLES = `
     transition: background-color var(--nc-transition), border-color var(--nc-transition), transform 0.1s ease;
 }
 
-/* The shared formatter keeps the quote characters inside <q>. */
 .next-choices-item q {
     color: var(--nc-accent);
 }
@@ -116,7 +102,6 @@ export const STYLES = `
     flex: 0 0 auto;
 }
 
-/* Base look of every small control (also the Retry button and the quick buttons). */
 .next-choices-tool {
     border: 1px solid var(--nc-border);
     border-radius: var(--nc-radius-small);
@@ -136,8 +121,6 @@ export const STYLES = `
     background-color: var(--nc-hover);
 }
 
-/* Regenerate / Dismiss keep the .next-choices-tool theme but get a full,
-   tappable square target. Scoped so Apply/Reset keep their own sizing. */
 .next-choices-regenerate,
 .next-choices-dismiss {
     box-sizing: border-box;
@@ -210,7 +193,6 @@ export const STYLES = `
     font-size: calc(var(--nc-font-size) * 0.9);
 }
 
-/* A message that is not a failure of the generation itself (for example a refused send). */
 .next-choices-notice {
     color: var(--nc-warning);
 }
@@ -224,11 +206,6 @@ export const STYLES = `
     opacity: 1;
 }
 
-/* --- Content wrapper and guidance panel ---------------------------------- */
-
-/* Wraps the scrollable list plus the guidance panel; the toolbar stays its
-   sibling so its vertical layout and the desktop/mobile orientations are
-   untouched. */
 .next-choices-content {
     display: flex;
     flex-direction: column;
@@ -237,7 +214,6 @@ export const STYLES = `
     gap: 6px;
 }
 
-/* Hidden via the hidden attribute, so no permanent display:flex here. */
 .next-choices-guidance,
 .next-choices-combine-panel {
     box-sizing: border-box;
@@ -280,7 +256,6 @@ export const STYLES = `
     display: none;
 }
 
-/* The host's own text-field classes do not exist here: style the fields ourselves. */
 .next-choices-guidance-input,
 .next-choices-edit-input {
     display: block;
@@ -319,8 +294,6 @@ export const STYLES = `
     gap: 8px;
 }
 
-/* Toolbar transformations: text buttons with real targets, unlike the square
-   icon buttons. */
 .next-choices-enhance,
 .next-choices-combine {
     box-sizing: border-box;
@@ -383,8 +356,6 @@ export const STYLES = `
     background-color: var(--nc-hover);
 }
 
-/* While a rewrite request is in flight the rows stay visible but inert:
-   no pointer affordance on the locked previews. */
 .next-choices-list-locked .next-choices-item {
     cursor: default;
 }
@@ -400,13 +371,8 @@ export const STYLES = `
     transform: none;
 }
 
-/* --- Per-choice editing ------------------------------------------------- */
-
 .next-choices-row {
     display: flex;
-    /* Center every control against the preview: with flex-start the shorter
-       preview is pinned to the top and the taller Edit control's center sits
-       below it. */
     align-items: center;
     gap: 5px;
     width: 100%;
@@ -418,8 +384,6 @@ export const STYLES = `
     min-width: 0;
 }
 
-/* Sits vertically centered against the choice preview, which keeps its own
-   text size: the control grows instead of the text shrinking. */
 .next-choices-edit {
     box-sizing: border-box;
     display: inline-flex;
@@ -448,8 +412,6 @@ export const STYLES = `
     margin-top: 10px;
 }
 
-/* Accent variants for the editor controls: muted confirm (green) and
-   discard (red) tints. */
 .next-choices-apply {
     border-color: rgba(95, 158, 110, 0.55);
     background-color: rgba(95, 158, 110, 0.16);
@@ -476,7 +438,6 @@ export const STYLES = `
     opacity: 1;
 }
 
-/* Focus and disabled states so hover-only visibility is never the only affordance. */
 .next-choices-stop:focus-visible,
 .next-choices-enhance-stop:focus-visible,
 .next-choices-enhance:focus-visible,
@@ -512,8 +473,6 @@ export const STYLES = `
     cursor: not-allowed;
 }
 
-/* --- Quick generate buttons (chat_input_tools_left) ---------------------- */
-
 .next-choices-quick-generate {
     box-sizing: border-box;
     display: inline-flex;
@@ -530,8 +489,6 @@ export const STYLES = `
     line-height: 1;
     opacity: 1;
 }
-
-/* --- Composer theme editor (guided generation) --------------------------- */
 
 #next_choices_generation_guidance {
     box-sizing: border-box;
@@ -551,8 +508,6 @@ export const STYLES = `
 #next_choices_generation_guidance .next-choices-guidance-input:disabled {
     opacity: 0.6;
 }
-
-/* --- Settings tab -------------------------------------------------------- */
 
 .next-choices-settings {
     display: flex;
@@ -607,7 +562,6 @@ export const STYLES = `
     opacity: 1;
 }
 
-/* Narrow screens: keep buttons tappable, stack the toolbar horizontally. */
 @media screen and (max-width: 600px) {
     .next-choices-container {
         flex-direction: column;
@@ -629,7 +583,6 @@ export const STYLES = `
         min-height: 40px;
     }
 
-    /* Keep editor controls comfortably tappable; the list stays full-width. */
     .next-choices-list {
         width: 100%;
     }

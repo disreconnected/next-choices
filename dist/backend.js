@@ -1,4 +1,16 @@
 // @bun
+// src/shared/error.ts
+function errorMessage(err) {
+  if (err instanceof Error)
+    return err.message;
+  if (typeof err === "string")
+    return err;
+  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+    return err.message;
+  }
+  return String(err);
+}
+
 // src/shared/templates.ts
 var LEGACY_DEFAULT_PROMPT_TEMPLATE = `You are an assistant helping a roleplay player. Below is the recent conversation between {{user}} and {{char}}:
 
@@ -81,31 +93,28 @@ function normalizeSettings(raw) {
 }
 
 // src/lumiverse/rpc.ts
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+var FRONTEND_TYPES = new Set([
+  "load_settings",
+  "save_settings",
+  "get_context",
+  "resolve_macros",
+  "generate",
+  "cancel"
+]);
+var BACKEND_TYPES = new Set([
+  "hello",
+  "settings",
+  "context",
+  "macros",
+  "result",
+  "error",
+  "command"
+]);
+function hasKnownType(value, types) {
+  return typeof value === "object" && value !== null && typeof value.type === "string" && types.has(value.type);
 }
-var isString = (value) => typeof value === "string";
-var isFiniteNumber = (value) => typeof value === "number" && Number.isFinite(value);
-var isStringOrNull = (value) => value === null || typeof value === "string";
 function isFrontendMessage(value) {
-  if (!isRecord(value) || !isString(value.requestId))
-    return false;
-  switch (value.type) {
-    case "load_settings":
-      return true;
-    case "save_settings":
-      return isRecord(value.settings);
-    case "get_context":
-      return isString(value.chatId) && isStringOrNull(value.characterId) && isFiniteNumber(value.historyDepth);
-    case "resolve_macros":
-      return isString(value.template) && isString(value.chatId) && isStringOrNull(value.characterId);
-    case "generate":
-      return isString(value.prompt) && isStringOrNull(value.connectionId) && isFiniteNumber(value.maxTokens);
-    case "cancel":
-      return isString(value.targetRequestId);
-    default:
-      return false;
-  }
+  return hasKnownType(value, FRONTEND_TYPES) && typeof value.requestId === "string";
 }
 
 // src/lumiverse/backend.ts
@@ -129,16 +138,6 @@ var COMMANDS = [
     scope: "chat-idle"
   }
 ];
-function errorMessage(err) {
-  if (err instanceof Error)
-    return err.message;
-  if (typeof err === "string")
-    return err;
-  if (typeof err === "object" && err !== null && typeof err.message === "string") {
-    return err.message;
-  }
-  return String(err);
-}
 function isAbortError(err) {
   return typeof err === "object" && err !== null && err.name === "AbortError";
 }

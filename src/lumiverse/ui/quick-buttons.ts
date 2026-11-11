@@ -1,10 +1,3 @@
-/**
- * Optional dice and compass buttons beside the message box (the
- * `showQuickGenerateButton` preference). They live in the host's
- * `chat_input_tools_left` mount point and are removed again when the
- * preference or the extension is switched off. The input bar menu entries
- * (registered by the controller) always exist while the extension is enabled.
- */
 import { toolButton } from './dom';
 import type { Translate } from './types';
 
@@ -13,20 +6,15 @@ export const GUIDED_BUTTON_ID = 'next_choices_guided_generate';
 
 export interface QuickButtonsDeps {
     tr: Translate;
-    /** The tools mount point. May throw or return a detached node outside the chat view. */
     mount(): Element | null;
-    /** enabled && showQuickGenerateButton, read when it matters. */
     isWanted(): boolean;
     onGenerate(): void;
-    /** Only opens the theme editor; the request is issued by its submit button. */
     onGuided(opener: Element): void;
 }
 
 export interface QuickButtons {
-    /** Adds, re-attaches or removes the buttons to match the preference. */
     sync(): void;
     setGuidedExpanded(open: boolean): void;
-    /** The visible launchers, for focus restoration. */
     elements(): HTMLElement[];
     relabel(): void;
     destroy(): void;
@@ -42,7 +30,6 @@ export function createQuickButtons(deps: QuickButtonsDeps): QuickButtons {
     function create(): void {
         dice = toolButton('next-choices-quick-generate', '🎲', { id: QUICK_BUTTON_ID });
         dice.addEventListener('click', () => {
-            // Re-read at click time: the preference may have been switched off after mounting.
             if (!deps.isWanted()) return;
             deps.onGenerate();
         });
@@ -89,7 +76,6 @@ export function createQuickButtons(deps: QuickButtonsDeps): QuickButtons {
             }
             if (!root) return;
             if (!dice || !compass) create();
-            // Appending again is a no-op for a correct pair and repairs a displaced one.
             if (dice!.parentElement !== root || compass!.parentElement !== root || dice!.nextElementSibling !== compass) {
                 root.append(dice!, compass!);
             }

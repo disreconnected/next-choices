@@ -147,16 +147,17 @@
   }
   var NON_STRING_WARNING = "[" + MODULE_NAME + "] substituteParams returned a non-string; using manual macro replacement.";
   var FAILED_WARNING = "[" + MODULE_NAME + "] substituteParams failed, using manual macro replacement:";
+  function acceptExpansion(unexpanded, expanded) {
+    if (typeof expanded === "string")
+      return expanded;
+    console.warn(NON_STRING_WARNING);
+    return unexpanded;
+  }
   function buildPrompt(template, vars, expand) {
     let prompt = prepareTemplate(template, vars.numChoices);
     if (expand) {
       try {
-        const expanded = expand(prompt);
-        if (typeof expanded === "string") {
-          prompt = expanded;
-        } else {
-          console.warn(NON_STRING_WARNING);
-        }
+        prompt = acceptExpansion(prompt, expand(prompt));
       } catch (err) {
         console.warn(FAILED_WARNING, err);
       }
@@ -217,18 +218,6 @@
 ` + payload + `
 === End of Next Choices guided generation ===`;
   }
-  function buildEnhancementPrompt(template, vars, choices, guidance, expand) {
-    const base = buildPrompt(template, { ...vars, numChoices: choices.length }, expand);
-    return appendEnhancementTask(base, choices, guidance);
-  }
-  function buildCombinationPrompt(template, vars, choices, expand) {
-    const base = buildPrompt(template, { ...vars, numChoices: 1 }, expand);
-    return appendCombinationTask(base, choices);
-  }
-  function buildGuidedPrompt(template, vars, guidance, expand) {
-    const base = buildPrompt(template, vars, expand);
-    return appendGuidedTask(base, vars.numChoices, guidance);
-  }
 
   // src/st/prompt.ts
   function buildHistory2(ctx, depth) {
@@ -255,14 +244,17 @@
   function buildPrompt2(ctx, settings) {
     return buildPrompt(settings.promptTemplate, promptVars(ctx, settings), macroExpander(ctx));
   }
-  function buildEnhancementPrompt2(ctx, settings, choices, guidance) {
-    return buildEnhancementPrompt(settings.promptTemplate, promptVars(ctx, settings), choices, guidance, macroExpander(ctx));
+  function buildEnhancementPrompt(ctx, settings, choices, guidance) {
+    const vars = { ...promptVars(ctx, settings), numChoices: choices.length };
+    return appendEnhancementTask(buildPrompt(settings.promptTemplate, vars, macroExpander(ctx)), choices, guidance);
   }
-  function buildCombinationPrompt2(ctx, settings, choices) {
-    return buildCombinationPrompt(settings.promptTemplate, promptVars(ctx, settings), choices, macroExpander(ctx));
+  function buildCombinationPrompt(ctx, settings, choices) {
+    const vars = { ...promptVars(ctx, settings), numChoices: 1 };
+    return appendCombinationTask(buildPrompt(settings.promptTemplate, vars, macroExpander(ctx)), choices);
   }
-  function buildGuidedPrompt2(ctx, settings, guidance) {
-    return buildGuidedPrompt(settings.promptTemplate, promptVars(ctx, settings), guidance, macroExpander(ctx));
+  function buildGuidedPrompt(ctx, settings, guidance) {
+    const vars = promptVars(ctx, settings);
+    return appendGuidedTask(buildPrompt(settings.promptTemplate, vars, macroExpander(ctx)), vars.numChoices, guidance);
   }
 
   // src/st/index.ts
@@ -395,7 +387,7 @@
       renderLoading(myRequestId, focusReturnTarget);
       let text;
       try {
-        const prompt = guided ? buildGuidedPrompt2(ctx, settings, theme) : buildPrompt2(ctx, settings);
+        const prompt = guided ? buildGuidedPrompt(ctx, settings, theme) : buildPrompt2(ctx, settings);
         text = await sendRawRequest(ctx, settings, prompt, requestController?.signal, myRequestId);
       } catch (err) {
         if (myRequestId !== requestId)
@@ -727,7 +719,7 @@
         setBusy(true);
         let response;
         try {
-          const prompt = buildEnhancementPrompt2(ctx, settings, originals, guidance);
+          const prompt = buildEnhancementPrompt(ctx, settings, originals, guidance);
           response = await sendRawRequest(ctx, settings, prompt, requestController?.signal, myRequestId);
         } catch (err) {
           if (myRequestId !== requestId)
@@ -867,7 +859,7 @@
         setCombinationBusy(true);
         let response;
         try {
-          const prompt = buildCombinationPrompt2(ctx, settings, selectedChoices);
+          const prompt = buildCombinationPrompt(ctx, settings, selectedChoices);
           response = await sendRawRequest(ctx, settings, prompt, requestController?.signal, myRequestId);
         } catch (err) {
           if (myRequestId !== requestId)

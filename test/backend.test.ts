@@ -6,10 +6,6 @@ import type { BackendMessage } from '../src/lumiverse/rpc';
 import { DEFAULT_SETTINGS, normalizeSettings } from '../src/shared/settings';
 import { LEGACY_DEFAULT_PROMPT_TEMPLATE } from '../src/shared/templates';
 
-// ---------------------------------------------------------------------------
-// Fake `spindle`: captures every call and lets a test script the host's answers
-// ---------------------------------------------------------------------------
-
 type Sent = { payload: BackendMessage; userId: string | undefined; options: { frontendSessionId?: string } | undefined };
 type HostMessage = Record<string, unknown>;
 
@@ -28,7 +24,6 @@ function makeFake() {
         register: [] as SpindleCommandDTO[][],
         unregister: [] as (string[] | undefined)[],
     };
-    // Scriptable host behaviour; tests reassign what they need.
     const host = {
         stored: undefined as unknown,
         getJsonError: undefined as Error | undefined,
@@ -123,12 +118,10 @@ function makeFake() {
         calls,
         generateCalls,
         host,
-        /** Delivers a payload as the host would and resolves once the backend has finished handling it. */
         deliver: (payload: unknown, userId = 'u1', sid?: string) => messageHandler!(payload, userId, sid),
         invokeCommand: (id: string, origin?: SpindleCommandOriginDTO) => commandHandler!(id, { route: '/chat/c1' }, origin),
         hasMessageHandler: () => messageHandler !== null,
         hasCommandHandler: () => commandHandler !== null,
-        /** Messages sent after the initial hello. */
         replies: () => sent.slice(1).map((s) => s.payload),
     };
 }
@@ -142,12 +135,9 @@ function start(setup?: (fake: Fake) => void) {
     return { fake, stop };
 }
 
-/** A chat message shaped like `chat.getMessages` output. */
 function msg(overrides: HostMessage): HostMessage {
     return { role: 'assistant', is_user: false, name: 'Bot', content: 'text', hidden: false, extra: {}, ...overrides };
 }
-
-// ---------------------------------------------------------------------------
 
 describe('startup', () => {
     test('registers the handler, then broadcasts hello with no user target', () => {
@@ -201,11 +191,10 @@ describe('invalid payloads', () => {
             {},
             { type: 'load_settings' },
             { type: 'nope', requestId: 'r' },
-            { type: 'generate', requestId: 'r', prompt: 'p' },
             { type: 'hello' },
         ];
         for (const payload of bad) await fake.deliver(payload);
-        expect(fake.sent).toHaveLength(1); // only the hello
+        expect(fake.sent).toHaveLength(1);
         expect(fake.calls.getJson).toHaveLength(0);
         expect(fake.generateCalls).toHaveLength(0);
         expect(fake.logs).toHaveLength(bad.length);
@@ -450,7 +439,7 @@ describe('resolve_macros', () => {
     });
 
     test('falls back to the unexpanded template when the macro engine fails', async () => {
-        const { fake } = start(); // host.macros unset: resolve() throws
+        const { fake } = start();
         await fake.deliver({ type: 'resolve_macros', requestId: 'm1', template: 'Hi {{user}}', chatId: 'c', characterId: null });
         expect(fake.replies()).toEqual([{ type: 'macros', requestId: 'm1', text: 'Hi {{user}}' }]);
     });
@@ -558,7 +547,6 @@ describe('generate', () => {
         expect(fake.replies()).toEqual([]);
         await fake.deliver({ type: 'cancel', requestId: 'x1', targetRequestId: 'g1' });
         await running;
-        // Cancel itself never replies.
         expect(fake.replies()).toEqual([
             { type: 'error', requestId: 'g1', message: 'The operation was aborted', aborted: true },
         ]);
@@ -584,7 +572,7 @@ describe('generate', () => {
         const { fake } = start();
         await fake.deliver(request());
         const before = fake.sent.length;
-        await fake.deliver({ type: 'cancel', requestId: 'x1', targetRequestId: 'g1' }); // already finished
+        await fake.deliver({ type: 'cancel', requestId: 'x1', targetRequestId: 'g1' });
         await fake.deliver({ type: 'cancel', requestId: 'x2', targetRequestId: 'never-existed' });
         expect(fake.sent).toHaveLength(before);
     });

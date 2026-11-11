@@ -1,10 +1,3 @@
-// Builds every shipped artifact from src/. The outputs are committed (the
-// SillyTavern extension loads ./index.js, Lumiverse installs from the repo and
-// loads dist/*), so they are intentionally unminified and without sourcemaps.
-//
-//   src/st/index.ts            -> index.js          (iife, browser)   SillyTavern
-//   src/lumiverse/frontend.ts  -> dist/frontend.js  (esm, browser)    Lumiverse
-//   src/lumiverse/backend.ts   -> dist/backend.js   (esm, bun)        Lumiverse
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 

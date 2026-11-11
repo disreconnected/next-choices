@@ -1,11 +1,4 @@
-/**
- * Promise-based client for the frontend <-> backend protocol in ./rpc.
- *
- * It only needs `sendToBackend` / `onBackendMessage`, so `createRpcClient(ctx)`
- * works with the Spindle frontend context and tests can pass a fake. Replies
- * are matched to requests by `requestId`; every payload crossing the process
- * boundary is validated with `isBackendMessage` first.
- */
+import { errorMessage } from '../shared/error';
 import type { NextChoicesSettings } from '../shared/settings';
 import { isBackendMessage, type BackendMessage, type FrontendMessage, type HistoryEntry } from './rpc';
 
@@ -14,7 +7,6 @@ export interface RpcTransport {
     onBackendMessage(handler: (payload: unknown) => void): () => void;
 }
 
-/** Rejection type of every request. `aborted` is true for a local abort and for a backend-reported abort. */
 export class RpcError extends Error {
     readonly aborted: boolean;
 
@@ -34,38 +26,17 @@ export interface ContextReply {
 }
 
 export interface RpcClientOptions {
-    /** Request id factory; defaults to crypto.randomUUID with a counter fallback. */
     newId?: () => string;
-    /** Reply timeout for every request except `generate` (which the caller aborts). 0 disables. Default 20 s. */
     requestTimeoutMs?: number;
 }
 
-export interface LoadSettingsOptions {
-    /** Resend interval while no reply has arrived. Default 500 ms. */
-    retryMs?: number;
-    /** Give up after this long and resolve null. Default 10 s. */
-    maxMs?: number;
-}
-
 export interface RpcClient {
-    /**
-     * Sends `load_settings` immediately, again every `retryMs` and whenever the
-     * backend announces itself with `hello`, until a `settings` reply arrives.
-     * Resolves null when nothing arrived within `maxMs`.
-     */
-    loadSettings(options?: LoadSettingsOptions): Promise<NextChoicesSettings | null>;
+    loadSettings(): Promise<NextChoicesSettings | null>;
     saveSettings(settings: NextChoicesSettings): Promise<NextChoicesSettings>;
     getContext(chatId: string, characterId: string | null, historyDepth: number): Promise<ContextReply>;
     resolveMacros(template: string, chatId: string, characterId: string | null): Promise<string>;
-    /**
-     * Resolves with the generated text. Aborting `signal` rejects immediately
-     * with `RpcError{aborted: true}` and tells the backend to cancel; whatever
-     * the backend still sends for that request afterwards is ignored.
-     */
     generate(prompt: string, connectionId: string | null, maxTokens: number, signal?: AbortSignal): Promise<string>;
     onCommand(handler: (id: string) => void): () => void;
-    onHello(handler: () => void): () => void;
-    /** Unsubscribes, stops all timers and rejects whatever is still pending. */
     dispose(): void;
 }
 
@@ -75,12 +46,18 @@ interface Pending {
     expect: ReplyType;
     resolve(message: BackendMessage): void;
     reject(error: RpcError): void;
-    /** Present for requests that are re-sent until answered. */
     resend?: () => void;
     cleanup(): void;
 }
 
+interface RequestOptions {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    resendOnHello?: boolean;
+}
+
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
+const LOAD_SETTINGS_TIMEOUT_MS = 10_000;
 
 function defaultIdFactory(): () => string {
     let counter = 0;
@@ -98,7 +75,6 @@ export function createRpcClient(transport: RpcTransport, options: RpcClientOptio
     const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     const pending = new Map<string, Pending>();
     const commandHandlers = new Set<(id: string) => void>();
-    const helloHandlers = new Set<() => void>();
     let disposed = false;
 
     function post(message: FrontendMessage): void {
@@ -109,7 +85,6 @@ export function createRpcClient(transport: RpcTransport, options: RpcClientOptio
         if (disposed || !isBackendMessage(payload)) return;
         if (payload.type === 'hello') {
             for (const entry of [...pending.values()]) entry.resend?.();
-            for (const handler of [...helloHandlers]) safely(() => handler());
             return;
         }
         if (payload.type === 'command') {
@@ -117,7 +92,7 @@ export function createRpcClient(transport: RpcTransport, options: RpcClientOptio
             return;
         }
         const entry = pending.get(payload.requestId);
-        if (!entry) return; // answered, aborted or timed out already
+        if (!entry) return;
         pending.delete(payload.requestId);
         entry.cleanup();
         if (payload.type === 'error') {
@@ -131,26 +106,46 @@ export function createRpcClient(transport: RpcTransport, options: RpcClientOptio
 
     const unsubscribe = transport.onBackendMessage(handleMessage);
 
-    /** Registers a pending request, sends it and resolves with the matching reply. */
     function request<T extends ReplyType>(
         build: (requestId: string) => FrontendMessage,
         expect: T,
-        timeoutMs: number = requestTimeoutMs,
+        { timeoutMs = requestTimeoutMs, signal, resendOnHello = false }: RequestOptions = {},
     ): Promise<Extract<BackendMessage, { type: T }>> {
         if (disposed) return Promise.reject(new RpcError('RPC client was disposed', true));
+        if (signal?.aborted) return Promise.reject(new RpcError('Aborted', true));
         const requestId = newId();
         return new Promise((resolve, reject) => {
             let timer: ReturnType<typeof setTimeout> | undefined;
+            const onAbort = () => {
+                if (!pending.delete(requestId)) return;
+                entry.cleanup();
+                try {
+                    post({ type: 'cancel', requestId: newId(), targetRequestId: requestId });
+                } catch {}
+                reject(new RpcError('Aborted', true));
+            };
             const entry: Pending = {
                 expect,
                 resolve: (message) => resolve(message as Extract<BackendMessage, { type: T }>),
                 reject,
-                cleanup: () => clearTimeout(timer),
+                cleanup: () => {
+                    clearTimeout(timer);
+                    signal?.removeEventListener('abort', onAbort);
+                },
             };
+            if (resendOnHello) {
+                entry.resend = () => {
+                    try {
+                        post(build(requestId));
+                    } catch {}
+                };
+            }
             pending.set(requestId, entry);
+            signal?.addEventListener('abort', onAbort, { once: true });
             if (timeoutMs > 0) {
                 timer = setTimeout(() => {
                     if (!pending.delete(requestId)) return;
+                    entry.cleanup();
                     reject(new RpcError('The Next Choices backend did not respond'));
                 }, timeoutMs);
             }
@@ -165,39 +160,16 @@ export function createRpcClient(transport: RpcTransport, options: RpcClientOptio
     }
 
     return {
-        loadSettings({ retryMs = 500, maxMs = 10_000 } = {}) {
-            if (disposed) return Promise.resolve(null);
-            const requestId = newId();
-            return new Promise((resolve) => {
-                let retryTimer: ReturnType<typeof setInterval> | undefined;
-                let giveUpTimer: ReturnType<typeof setTimeout> | undefined;
-                const message: FrontendMessage = { type: 'load_settings', requestId };
-                const send = () => {
-                    try {
-                        post(message);
-                    } catch {
-                        /* the next retry may succeed */
-                    }
-                };
-                const cleanup = () => {
-                    clearInterval(retryTimer);
-                    clearTimeout(giveUpTimer);
-                };
-                pending.set(requestId, {
-                    expect: 'settings',
-                    resend: send,
-                    cleanup,
-                    resolve: (reply) => resolve(reply.type === 'settings' ? reply.settings : null),
-                    reject: () => resolve(null),
+        async loadSettings() {
+            try {
+                const reply = await request((requestId) => ({ type: 'load_settings', requestId }), 'settings', {
+                    timeoutMs: LOAD_SETTINGS_TIMEOUT_MS,
+                    resendOnHello: true,
                 });
-                send();
-                retryTimer = setInterval(send, retryMs);
-                giveUpTimer = setTimeout(() => {
-                    if (!pending.delete(requestId)) return;
-                    cleanup();
-                    resolve(null);
-                }, maxMs);
-            });
+                return reply.settings;
+            } catch {
+                return null;
+            }
         },
 
         async saveSettings(settings) {
@@ -205,18 +177,11 @@ export function createRpcClient(transport: RpcTransport, options: RpcClientOptio
             return reply.settings;
         },
 
-        async getContext(chatId, characterId, historyDepth) {
-            const reply = await request(
+        getContext(chatId, characterId, historyDepth) {
+            return request(
                 (requestId) => ({ type: 'get_context', requestId, chatId, characterId, historyDepth }),
                 'context',
             );
-            return {
-                history: reply.history,
-                userName: reply.userName,
-                charName: reply.charName,
-                persona: reply.persona,
-                lastIsUser: reply.lastIsUser,
-            };
         },
 
         async resolveMacros(template, chatId, characterId) {
@@ -227,46 +192,18 @@ export function createRpcClient(transport: RpcTransport, options: RpcClientOptio
             return reply.text;
         },
 
-        generate(prompt, connectionId, maxTokens, signal) {
-            if (disposed) return Promise.reject(new RpcError('RPC client was disposed', true));
-            if (signal?.aborted) return Promise.reject(new RpcError('Aborted', true));
-            const requestId = newId();
-            return new Promise<string>((resolve, reject) => {
-                const onAbort = () => {
-                    // Drop the entry first so a late reply for it can never surface.
-                    if (!pending.delete(requestId)) return;
-                    try {
-                        post({ type: 'cancel', requestId: newId(), targetRequestId: requestId });
-                    } catch {
-                        /* the backend is unreachable anyway */
-                    }
-                    reject(new RpcError('Aborted', true));
-                };
-                pending.set(requestId, {
-                    expect: 'result',
-                    cleanup: () => signal?.removeEventListener('abort', onAbort),
-                    resolve: (reply) => resolve(reply.type === 'result' ? reply.text : ''),
-                    reject,
-                });
-                signal?.addEventListener('abort', onAbort, { once: true });
-                try {
-                    post({ type: 'generate', requestId, prompt, connectionId, maxTokens });
-                } catch (err) {
-                    pending.delete(requestId);
-                    signal?.removeEventListener('abort', onAbort);
-                    reject(new RpcError(errorMessage(err)));
-                }
-            });
+        async generate(prompt, connectionId, maxTokens, signal) {
+            const reply = await request(
+                (requestId) => ({ type: 'generate', requestId, prompt, connectionId, maxTokens }),
+                'result',
+                { timeoutMs: 0, signal },
+            );
+            return reply.text;
         },
 
         onCommand(handler) {
             commandHandlers.add(handler);
             return () => void commandHandlers.delete(handler);
-        },
-
-        onHello(handler) {
-            helloHandlers.add(handler);
-            return () => void helloHandlers.delete(handler);
         },
 
         dispose() {
@@ -280,13 +217,8 @@ export function createRpcClient(transport: RpcTransport, options: RpcClientOptio
                 entry.reject(new RpcError('RPC client was disposed', true));
             }
             commandHandlers.clear();
-            helloHandlers.clear();
         },
     };
-}
-
-function errorMessage(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
 }
 
 function safely(fn: () => void): void {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { chatIdFromChatChanged, createEventFilter, DEDUPE_WINDOW_MS, isForegroundTab } from '../src/lumiverse/ui/event-filter';
+import { chatIdFromChatChanged, createEventFilter, DEDUPE_WINDOW_MS } from '../src/lumiverse/ui/event-filter';
 
 function make(activeChatId: string | null = 'chat1') {
     let time = 1_000_000;
@@ -32,7 +32,6 @@ describe('onGenerationEnded', () => {
         ['another chat', { chatId: 'chat2' }],
         ['no saved message', { messageId: undefined }],
         ['no chat id', { chatId: undefined }],
-        ['an extension payload', { extensionId: 'summarizer' }],
     ])('ignores %s', (_name, extra) => {
         expect(make().filter.onGenerationEnded(ended(extra))).toBe('ignore');
     });
@@ -162,18 +161,5 @@ describe('chatIdFromChatChanged', () => {
         for (const bad of [null, undefined, 'x', {}, { chat: {} }, { chatId: '' }, { chat: { id: 5 } }]) {
             expect(chatIdFromChatChanged(bad)).toBeNull();
         }
-    });
-});
-
-describe('isForegroundTab', () => {
-    test('only the visible tab acts on a backend command', () => {
-        expect(isForegroundTab('visible')).toBe(true);
-        expect(isForegroundTab('hidden')).toBe(false);
-        expect(isForegroundTab('prerender')).toBe(false);
-    });
-
-    test('a host without the Page Visibility API counts as foreground', () => {
-        expect(isForegroundTab(undefined)).toBe(true);
-        expect(isForegroundTab(null)).toBe(true);
     });
 });

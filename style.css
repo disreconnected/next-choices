@@ -1,4 +1,3 @@
-/* Next Choices */
 
 .next-choices-container {
     display: flex;
@@ -15,7 +14,6 @@
     gap: 5px;
     flex: 1 1 auto;
     min-width: 0;
-    /* Keep lengthy generated choices from covering the conversation. */
     max-height: min(42vh, 28rem);
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -41,8 +39,6 @@
     transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
 
-/* Keep formatted choice text (from ST's messageFormatting) in sync with the
-   chat's own .mes_text theme coloring for quotes/italics/underline. */
 .next-choices-item p {
     margin: 0;
 }
@@ -106,8 +102,6 @@
     background-color: var(--white20a, rgba(255, 255, 255, 0.12));
 }
 
-/* Regenerate / Dismiss keep the .next-choices-tool theme but get a full,
-   tappable square target. Scoped so Apply/Reset keep their own sizing. */
 .next-choices-regenerate,
 .next-choices-dismiss {
     box-sizing: border-box;
@@ -184,11 +178,7 @@
     flex: 0 0 auto;
 }
 
-/* --- Content wrapper and guidance panel ---------------------------------- */
 
-/* Wraps the scrollable list plus the guidance panel; the toolbar stays its
-   sibling so its vertical layout and the desktop/mobile orientations are
-   untouched. */
 .next-choices-content {
     display: flex;
     flex-direction: column;
@@ -197,8 +187,6 @@
     gap: 6px;
 }
 
-/* Guidance panel: hidden via jQuery hide()/show() (inline display), so it
-   must not carry a permanent display:flex. */
 .next-choices-guidance,
 .next-choices-combine-panel {
     box-sizing: border-box;
@@ -259,8 +247,6 @@
     gap: 8px;
 }
 
-/* Toolbar transformations: text buttons with real targets, unlike the square
-   icon buttons. */
 .next-choices-enhance,
 .next-choices-combine {
     box-sizing: border-box;
@@ -323,8 +309,6 @@
     background-color: var(--white20a, rgba(255, 255, 255, 0.12));
 }
 
-/* While an enhancement request is in flight the rows stay visible but inert:
-   no pointer affordance on the locked previews. */
 .next-choices-list-locked .next-choices-item {
     cursor: default;
 }
@@ -340,13 +324,9 @@
     transform: none;
 }
 
-/* --- Per-choice editing ------------------------------------------------- */
 
 .next-choices-row {
     display: flex;
-    /* Center every control against the preview: with flex-start the shorter
-       preview is pinned to the top and the taller Edit control's center sits
-       below it. */
     align-items: center;
     gap: 5px;
     width: 100%;
@@ -358,8 +338,6 @@
     min-width: 0;
 }
 
-/* Sits vertically centered against the choice preview, which keeps its own
-   text size: the control grows instead of the text shrinking. */
 .next-choices-edit {
     box-sizing: border-box;
     display: inline-flex;
@@ -399,9 +377,6 @@
     margin-top: 10px;
 }
 
-/* Accent variants for the editor controls: muted confirm (green) and
-   discard (red) tints. Tinted borders/backgrounds with colored text keep
-   them legible on dark themes without shouting against SillyTavern's UI. */
 .next-choices-apply {
     border-color: rgba(95, 158, 110, 0.55);
     background-color: rgba(95, 158, 110, 0.16);
@@ -428,9 +403,6 @@
     opacity: 1;
 }
 
-/* Reuse .next-choices-tool for theme/border/color; add focus and disabled
-   states scoped to the new controls so hover-only visibility is never the
-   only affordance. */
 .next-choices-stop:focus-visible,
 .next-choices-enhance-stop:focus-visible,
 .next-choices-enhance:focus-visible,
@@ -465,15 +437,7 @@
     cursor: not-allowed;
 }
 
-/* --- Composer quick-generate shortcut ------------------------------------ */
 
-/* Opt-in shortcut for the message-box toolbar. Reuses the .next-choices-tool
-   theme (background/body color, hover) but stays fully opaque. The box model
-   deliberately copies the neighboring Guided Generations .gg-action-button
-   controls (content-sized, same padding/font-size, same 4px radius) and their
-   brighter --SmartThemeBodyColor border, so the two Next Choices controls sit
-   in the composer toolbar at the same size as the buttons beside them instead
-   of towering over them. */
 .next-choices-quick-generate {
     box-sizing: border-box;
     display: inline-flex;
@@ -493,9 +457,6 @@
     border-radius: 4px;
 }
 
-/* Fallback row: only used while Guided Generations has no toolbar of its own.
-   A full-width row inside #send_form matches #nonQRFormItems instead of
-   squeezing into the narrow #rightSendForm column on mobile. */
 #next_choices_quick_actions {
     box-sizing: border-box;
     display: flex;
@@ -509,8 +470,6 @@
     padding: 5px;
 }
 
-/* While the shortcut lives inside Guided Generations' toolbar, let that
-   toolbar wrap rather than pushing horizontal overflow. */
 #gg-action-button-container.next-choices-quick-host {
     flex-wrap: wrap;
     min-width: 0;
@@ -525,11 +484,7 @@
     justify-content: flex-end;
 }
 
-/* --- Composer theme editor (guided generation) --------------------------- */
 
-/* Mounted as a direct child of #send_form (moved there by the reconciler) so
-   the editor can sit above the composer toolbar; its flex order is copied from
-   whichever host it is placed before. */
 #next_choices_generation_guidance {
     box-sizing: border-box;
     display: flex;
@@ -539,14 +494,9 @@
     flex-basis: 100%;
     min-width: 0;
     padding: 5px;
-    /* #form_sheld inherits white-space: nowrap, so a long theme and the hint
-       text must be allowed to wrap in the narrow composer column. */
     white-space: normal;
 }
 
-/* The panel is the same disclosure unit the choice-list Enhance panel uses;
-   only its host differs, so it keeps that theme and adds no horizontal
-   overflow on narrow screens. */
 #next_choices_generation_guidance .next-choices-guidance {
     max-width: 100%;
 }
@@ -555,7 +505,6 @@
     opacity: 0.6;
 }
 
-/* --- Settings panel ------------------------------------------------------ */
 
 .next-choices-settings-row {
     display: flex;
@@ -589,7 +538,6 @@
     margin-top: 6px;
 }
 
-/* Narrow screens: keep buttons tappable, stack the toolbar horizontally */
 @media screen and (max-width: 600px) {
     .next-choices-container {
         flex-direction: column;
@@ -611,7 +559,6 @@
         min-height: 40px;
     }
 
-    /* Keep editor controls comfortably tappable; the list stays full-width. */
     .next-choices-list {
         width: 100%;
     }

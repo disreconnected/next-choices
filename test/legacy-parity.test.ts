@@ -1,11 +1,5 @@
-/**
- * Differential test: the extracted code (src/shared + src/st/prompt) must give
- * exactly the same results as the original index.js code, which is kept
- * verbatim in test/legacy-oracle.js (a mechanical copy of the pure parts of
- * index.js at the commit before the extraction).
- */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-// @ts-expect-error -- plain JS fixture without type declarations (verbatim legacy code)
+// @ts-expect-error
 import * as legacy from './legacy-oracle.js';
 import { parseChoices, parseRewrittenChoices } from '../src/shared/parse';
 import { HISTORY_PLACEHOLDER } from '../src/shared/prompt';
@@ -36,10 +30,6 @@ describe('constants', () => {
         expect(Object.isFrozen(DEFAULT_SETTINGS)).toBe(Object.isFrozen(legacy.DEFAULT_SETTINGS));
     });
 });
-
-// ---------------------------------------------------------------------------
-// Prompt building
-// ---------------------------------------------------------------------------
 
 const CHATS: Array<[string, unknown]> = [
     [
@@ -177,10 +167,6 @@ describe('prompt building matches index.js', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Parsing
-// ---------------------------------------------------------------------------
-
 const PARSE_INPUTS: unknown[] = [
     '["a","b","c"]',
     '[" a ", "", "   ", "b"]',
@@ -264,17 +250,12 @@ describe('parsing matches index.js', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Settings
-// ---------------------------------------------------------------------------
-
 describe('settings match index.js', () => {
     const INPUTS: unknown[] = [
         '3', '3.7', '0', '-1', 'abc', '', ' ', '1', '7', '10', '15', '99999', '1.9', '08', '1e3', '0x10',
         '  5  ', '5px', undefined, null, NaN, 0, 4, -3, 99, ['2'], [],
     ];
 
-    // Transcribed from the input handlers in bindSettingsUI() of index.js.
     const legacyNum = (raw: unknown) => {
         const value = parseInt(raw as string, 10);
         return Number.isFinite(value) && value > 0 ? Math.min(value, 10) : legacy.DEFAULT_SETTINGS.numChoices;
@@ -317,7 +298,6 @@ describe('settings match index.js', () => {
                 (globalThis as Record<string, unknown>).SillyTavern = { getContext: () => legacyCtx };
                 const legacyResult = legacy.getSettings();
 
-                // The composition that the SillyTavern adapter performs in getSettings().
                 let saves = 0;
                 const sharedStore: Record<string, unknown> =
                     store === undefined ? { ...DEFAULT_SETTINGS } : (structuredClone(store) as Record<string, unknown>);

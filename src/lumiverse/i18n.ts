@@ -1,17 +1,6 @@
-/**
- * UI strings. The English text is the key (same convention as the
- * SillyTavern build); zh-TW comes from the shared i18n/zh-tw.json table plus
- * a small table for strings that only exist in the Lumiverse build. A missing
- * key falls back to the English text, so an untranslated string is never blank.
- */
 import zhTW from '../../i18n/zh-tw.json';
 
-export type Locale = 'en' | 'zh' | 'zh-TW' | 'ja' | 'fr' | 'it';
-
 const LUMIVERSE_ZH_TW: Readonly<Record<string, string>> = {
-    'Next Choices': 'Next Choices',
-    'Choices': '選項',
-    'Next Choices settings': 'Next Choices 設定',
     'Auto-generate (create choices after each AI reply. You can always trigger manually from the input bar menu)':
         '自動生成（AI 回覆後自動產生選項；也可隨時從輸入列選單手動生成）',
     'Send failed: chat is busy': '送出失敗：聊天正忙碌中',
@@ -28,17 +17,16 @@ const TABLES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     'zh-TW': { ...(zhTW as Record<string, string>), ...LUMIVERSE_ZH_TW },
 };
 
-let currentLocale: Locale = 'en';
+let currentLocale = 'en';
 
 export function setLocale(locale: string | null | undefined): void {
-    currentLocale = (locale || 'en') as Locale;
+    currentLocale = locale || 'en';
 }
 
-export function getLocale(): Locale {
+export function getLocale(): string {
     return currentLocale;
 }
 
-/** Looks up `key` for `locale` (English text when there is no table or no entry). */
 export function translate(locale: string, key: string, vars?: Readonly<Record<string, string | number>>): string {
     const text = TABLES[locale]?.[key] ?? key;
     if (!vars) return text;
@@ -47,7 +35,6 @@ export function translate(locale: string, key: string, vars?: Readonly<Record<st
     return result;
 }
 
-/** Translates `key` for the current locale and substitutes `{name}` placeholders from `vars`. */
 export function tr(key: string, vars?: Readonly<Record<string, string | number>>): string {
     return translate(currentLocale, key, vars);
 }

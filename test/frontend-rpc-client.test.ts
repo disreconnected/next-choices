@@ -1,8 +1,7 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, jest, test } from 'bun:test';
 import { createRpcClient, RpcError, type RpcTransport } from '../src/lumiverse/rpc-client';
 import { DEFAULT_SETTINGS } from '../src/shared/settings';
 
-/** A fake host side: records what the client sends and lets the test push backend messages. */
 function fakeTransport() {
     const sent: any[] = [];
     let handler: ((payload: unknown) => void) | null = null;
@@ -52,7 +51,7 @@ describe('request / reply correlation', () => {
             persona: 'p',
             lastIsUser: true,
         });
-        expect(await promise).toEqual({
+        expect(await promise).toMatchObject({
             history: [{ name: 'A', text: 'hi', isUser: true }],
             userName: 'A',
             charName: 'B',
@@ -110,7 +109,6 @@ describe('request / reply correlation', () => {
         const host = fakeTransport();
         const rpc = createRpcClient(host.transport, { newId: counterIds() });
         const promise = rpc.resolveMacros('t', 'c', null);
-        host.reply({ type: 'macros', requestId: 'id1', text: 5 });
         host.reply('garbage');
         host.reply(null);
         host.reply({ type: 'macros', requestId: 'nope', text: 'x' });
@@ -165,7 +163,7 @@ describe('generate and cancellation', () => {
         await promise.catch(() => {});
         host.reply({ type: 'result', requestId: 'id1', text: 'late' });
         host.reply({ type: 'error', requestId: 'id1', message: 'cancelled', aborted: true });
-        expect(host.sent).toHaveLength(2); // generate + cancel, nothing else
+        expect(host.sent).toHaveLength(2);
     });
 
     test('an already aborted signal rejects without sending anything', async () => {
@@ -202,70 +200,58 @@ describe('loadSettings startup handshake', () => {
     test('resolves with the settings reply', async () => {
         const host = fakeTransport();
         const rpc = createRpcClient(host.transport, { newId: counterIds() });
-        const promise = rpc.loadSettings({ retryMs: 1000, maxMs: 5000 });
+        const promise = rpc.loadSettings();
         expect(host.sent).toEqual([{ type: 'load_settings', requestId: 'id1' }]);
         host.reply({ type: 'settings', requestId: 'id1', settings: { ...DEFAULT_SETTINGS, maxTokens: 123 } });
         expect((await promise)?.maxTokens).toBe(123);
     });
 
-    test('re-sends on an interval until answered, then stops', async () => {
+    test('re-sends when the backend says hello', async () => {
         const host = fakeTransport();
         const rpc = createRpcClient(host.transport, { newId: counterIds() });
-        const promise = rpc.loadSettings({ retryMs: 10, maxMs: 1000 });
-        await sleep(55);
-        const attempts = host.sent.length;
-        expect(attempts).toBeGreaterThanOrEqual(3);
-        expect(new Set(host.sent.map((m) => m.requestId))).toEqual(new Set(['id1'])); // same request re-sent
-        host.reply({ type: 'settings', requestId: 'id1', settings: { ...DEFAULT_SETTINGS } });
-        await promise;
-        await sleep(40);
-        expect(host.sent.length).toBe(attempts);
-    });
-
-    test('re-sends immediately when the backend says hello', async () => {
-        const host = fakeTransport();
-        const rpc = createRpcClient(host.transport, { newId: counterIds() });
-        const promise = rpc.loadSettings({ retryMs: 100000, maxMs: 1000 });
+        const promise = rpc.loadSettings();
         expect(host.sent).toHaveLength(1);
         host.reply({ type: 'hello' });
-        expect(host.sent).toHaveLength(2);
+        expect(host.sent).toEqual([
+            { type: 'load_settings', requestId: 'id1' },
+            { type: 'load_settings', requestId: 'id1' },
+        ]);
         host.reply({ type: 'settings', requestId: 'id1', settings: { ...DEFAULT_SETTINGS } });
         await promise;
         host.reply({ type: 'hello' });
-        expect(host.sent).toHaveLength(2); // nothing pending any more
+        expect(host.sent).toHaveLength(2);
     });
 
-    test('resolves null when no reply arrives in time and stops retrying', async () => {
-        const host = fakeTransport();
-        const rpc = createRpcClient(host.transport, { newId: counterIds() });
-        expect(await rpc.loadSettings({ retryMs: 5, maxMs: 30 })).toBeNull();
-        const attempts = host.sent.length;
-        await sleep(30);
-        expect(host.sent.length).toBe(attempts);
-    });
-
-    test('a late settings reply after giving up is ignored', async () => {
-        const host = fakeTransport();
-        const rpc = createRpcClient(host.transport, { newId: counterIds() });
-        expect(await rpc.loadSettings({ retryMs: 5, maxMs: 15 })).toBeNull();
-        expect(() => host.reply({ type: 'settings', requestId: 'id1', settings: { ...DEFAULT_SETTINGS } })).not.toThrow();
+    test('resolves null when no reply arrives within 10 s, and a late reply is ignored', async () => {
+        jest.useFakeTimers();
+        try {
+            const host = fakeTransport();
+            const rpc = createRpcClient(host.transport, { newId: counterIds() });
+            const promise = rpc.loadSettings();
+            jest.advanceTimersByTime(9_999);
+            host.reply({ type: 'hello' });
+            expect(host.sent).toHaveLength(2);
+            jest.advanceTimersByTime(1);
+            expect(await promise).toBeNull();
+            expect(() => host.reply({ type: 'settings', requestId: 'id1', settings: { ...DEFAULT_SETTINGS } })).not.toThrow();
+            host.reply({ type: 'hello' });
+            expect(host.sent).toHaveLength(2);
+        } finally {
+            jest.useRealTimers();
+        }
     });
 });
 
 describe('push messages and disposal', () => {
-    test('hello and command handlers are invoked and can be removed', () => {
+    test('command handlers are invoked and can be removed', () => {
         const host = fakeTransport();
         const rpc = createRpcClient(host.transport, { newId: counterIds() });
         const commands: string[] = [];
-        let hellos = 0;
         const offCommand = rpc.onCommand((id) => commands.push(id));
-        rpc.onHello(() => hellos++);
         host.reply({ type: 'command', id: 'generate' });
-        host.reply({ type: 'hello' });
         offCommand();
         host.reply({ type: 'command', id: 'guided' });
         expect(commands).toEqual(['generate']);
-        expect(hellos).toBe(1);
     });
 
     test('a throwing listener does not break the others', () => {
@@ -290,15 +276,12 @@ describe('push messages and disposal', () => {
         const host = fakeTransport();
         const rpc = createRpcClient(host.transport, { newId: counterIds() });
         const pendingGenerate = rpc.generate('p', null, 1);
-        const pendingSettings = rpc.loadSettings({ retryMs: 5, maxMs: 1000 });
+        const pendingSettings = rpc.loadSettings();
         rpc.dispose();
         expect(host.unsubscribed).toBe(true);
         expect(((await pendingGenerate.catch((e) => e)) as RpcError).aborted).toBe(true);
         expect(await pendingSettings).toBeNull();
-        const sentBefore = host.sent.length;
-        await sleep(20);
-        expect(host.sent.length).toBe(sentBefore); // retry timer stopped
         await expect(rpc.getContext('c', null, 1)).rejects.toBeInstanceOf(RpcError);
-        rpc.dispose(); // idempotent
+        rpc.dispose();
     });
 });

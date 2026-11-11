@@ -1,17 +1,8 @@
-/**
- * Next Choices, Lumiverse (Spindle) frontend module.
- *
- * After each AI reply it asks the backend (see ./backend.ts) for suggested
- * player replies and shows them above the composer. This file is the
- * controller: it owns the settings, the request ids and cancellation, the
- * mount points, the host events and the composer. The DOM lives in ./ui, the
- * settings tab in ./settings-panel, the transport in ./rpc-client. The
- * behaviour is a port of the SillyTavern adapter (src/st/index.ts).
- */
 import type {
     SpindleFrontendContext,
     SpindleInputBarActionHandle,
 } from 'lumiverse-spindle-types';
+import { errorMessage } from '../shared/error';
 import { parseChoices } from '../shared/parse';
 import {
     appendCombinationTask,
@@ -21,7 +12,7 @@ import {
     buildPromptAsync,
     type PromptVars,
 } from '../shared/prompt';
-import { DEFAULT_SETTINGS, MODULE_NAME, normalizeSettings, type NextChoicesSettings } from '../shared/settings';
+import { DEFAULT_SETTINGS, MODULE_NAME, type NextChoicesSettings } from '../shared/settings';
 import { getLocale, setLocale, tr } from './i18n';
 import { createRpcClient, RpcError, type ContextReply, type RpcClient } from './rpc-client';
 import {
@@ -32,12 +23,11 @@ import {
 } from './settings-panel';
 import { STYLES } from './styles';
 import { CONTAINER_ID, createChoicesUi, type ChoicesUi } from './ui/choices-ui';
-import { errorText, h, isRendered } from './ui/dom';
+import { h, isRendered } from './ui/dom';
 import {
     AUTO_GENERATE_DEBOUNCE_MS,
     chatIdFromChatChanged,
     createEventFilter,
-    isForegroundTab,
 } from './ui/event-filter';
 import { createGuidanceEditor, type GuidanceEditor } from './ui/guidance-editor';
 import { COMPASS_SVG, DICE_SVG } from './ui/icons';
@@ -45,7 +35,6 @@ import { createQuickButtons } from './ui/quick-buttons';
 import { NoConversationError, type RequestHandle, type RewriteTask } from './ui/types';
 
 const LOG = `[${MODULE_NAME}]`;
-/** Edits in the settings tab are saved this long after the last one. */
 const SAVE_DEBOUNCE_MS = 300;
 
 type Reason = 'manual' | 'auto' | 'guided';
@@ -57,17 +46,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         if (typeof fn === 'function') cleanups.push(fn);
     };
 
-    // The host queues backend messages until ready(). Defer only until the RPC
-    // handler below is registered: waiting for the settings reply here would
-    // deadlock, because that reply is itself a queued startup message.
-    ctx.deferReady?.();
-    try {
-        setLocale(ctx.locale?.get?.());
-    } catch {
-        setLocale('en');
-    }
+    setLocale(ctx.locale.get());
 
-    /** The live settings. One object for the whole session: the settings tab writes into it. */
     const settings: NextChoicesSettings = { ...DEFAULT_SETTINGS };
     const rpc: RpcClient = createRpcClient(ctx);
     track(() => rpc.dispose());
@@ -87,7 +67,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     let lastUserName = '';
     let lastChatId: string | null = getActiveChat().chatId;
 
-    // State declared up front: the functions below reference each other freely.
     let mountRoot: HTMLElement | null = null;
     let container: HTMLElement | null = null;
     let mountWarned = false;
@@ -96,24 +75,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     let settingsHeading: HTMLElement | null = null;
     const inputActions: Array<{ handle: SpindleInputBarActionHandle; label: string }> = [];
 
-    let sequence = 0; // request counter: a result is stale once it no longer matches
+    let sequence = 0;
     let abortController: AbortController | null = null;
     let autoTimer: ReturnType<typeof setTimeout> | undefined;
 
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
     let saveDirty = false;
-    let saveEpoch = 0;
 
-    // =========================================================================
-    // Mount point above the composer
-    // =========================================================================
-
-    /**
-     * The container above the composer, (re)attached to a live mount root. The
-     * chat view can be rebuilt (chat switch, navigation), which detaches the
-     * root, so this runs before every render rather than only at startup.
-     * Null when there is no composer on screen.
-     */
     function ensureMounted(): HTMLElement | null {
         if (disposed) return null;
         if (container && container.isConnected && mountRoot?.contains(container)) return container;
@@ -126,20 +94,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             return null;
         }
         if (!root) return null;
-        // Only our own nodes are moved; a root the host left behind is the host's to clean up.
         mountRoot = root as HTMLElement;
         container ??= h('div', { id: CONTAINER_ID, className: 'next-choices-container', hidden: true });
         if (container.parentElement !== mountRoot) mountRoot.append(container);
-        // The theme editor sits just above the choices; it follows a re-acquired root.
         if (guidanceEditor && guidanceEditor.wrapper.parentElement !== mountRoot) {
             mountRoot.insertBefore(guidanceEditor.wrapper, container);
         }
         return container.isConnected ? container : null;
     }
-
-    // =========================================================================
-    // Requests: ids, cancellation, auto-generate timer
-    // =========================================================================
 
     function cancelAutoTimer(): void {
         clearTimeout(autoTimer);
@@ -151,7 +113,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         if (!settings.enabled || !settings.autoGenerate) return;
         autoTimer = setTimeout(() => {
             autoTimer = undefined;
-            // Settings may have changed while the timer was pending.
             if (settings.enabled && settings.autoGenerate) void generateChoices('auto');
         }, AUTO_GENERATE_DEBOUNCE_MS);
     }
@@ -160,12 +121,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         sequence++;
         try {
             abortController?.abort();
-        } catch {
-            /* ignore */
-        }
+        } catch {}
         abortController = null;
-        // The theme editor is locked only for the duration of its own request, so
-        // anything that abandons a pending request must unlock it here.
         guidanceEditor?.setBusy(false);
     }
 
@@ -174,19 +131,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         const id = sequence;
         const controller = new AbortController();
         abortController = controller;
-        return { id, signal: controller.signal, isCurrent: () => id === sequence };
+        return { signal: controller.signal, isCurrent: () => id === sequence };
     }
-
-    // =========================================================================
-    // Focus
-    // =========================================================================
 
     function focusComposer(): void {
         try {
             ctx.composer?.focus();
-        } catch {
-            /* no composer mounted */
-        }
+        } catch {}
     }
 
     function restoreFocusToLauncher(opener: Element | null): void {
@@ -200,7 +151,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         focusComposer();
     }
 
-    /** After Stop: back to what had focus, if that was a launcher or the composer; otherwise the first visible launcher. */
     function restoreFocusAfterStop(target: Element | null): void {
         const launchers = quick.elements();
         const keepTarget =
@@ -217,10 +167,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         }
         focusComposer();
     }
-
-    // =========================================================================
-    // Guided theme editor
-    // =========================================================================
 
     function getGuidanceEditor(): GuidanceEditor {
         if (!guidanceEditor) {
@@ -242,7 +188,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         return guidanceEditor;
     }
 
-    /** Discards the editor and its draft (the conversation turn is over, or the extension is off). */
     function resetGuidance(): void {
         guidanceEditor?.destroy();
         guidanceEditor = null;
@@ -255,11 +200,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         editor.setOpen(!editor.isOpen(), opener);
     }
 
-    // =========================================================================
-    // Generation
-    // =========================================================================
-
-    /** The id the backend expects: null means "the connection that is active in Lumiverse". */
     function connectionId(snapshot: NextChoicesSettings): string | null {
         return snapshot.profileId && snapshot.profileId !== 'current' ? snapshot.profileId : null;
     }
@@ -274,7 +214,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         };
     }
 
-    /** Template with the host's macros expanded and the history spliced in last (never macro-expanded). */
     function buildBasePrompt(
         info: ContextReply,
         snapshot: NextChoicesSettings,
@@ -291,8 +230,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         if (disposed || !settings.enabled) return;
         if (reason === 'auto' && !settings.autoGenerate) return;
 
-        // Only the guided reason consumes the submitted theme. The dice, Retry and
-        // auto callbacks are unguided by construction.
         const guided = reason === 'guided';
         const theme = guided ? String(guidance ?? '').trim() : '';
         if (guided && !theme) return;
@@ -300,18 +237,13 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         const { chatId, characterId } = getActiveChat();
         if (!chatId) return;
 
-        // Snapshot before the first await: a preference changed while the request
-        // is in flight must not change this request's prompt or its validation.
         const snapshot: NextChoicesSettings = { ...settings };
 
-        // A pending auto-generation would otherwise fire mid-request and abort
-        // the guided request it was submitted from.
         if (guided) cancelAutoTimer();
         const focusTarget = document.activeElement;
 
         const handle = beginRequest();
         if (guided) guidanceEditor?.setBusy(true);
-        // Auto generation shows nothing until the chat is known to need choices.
         if (reason !== 'auto') choicesUi.renderLoading(handle, focusTarget);
 
         let text: string;
@@ -321,7 +253,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             lastUserName = info.userName;
 
             if (info.history.length === 0 || (reason === 'auto' && info.lastIsUser)) {
-                if (reason === 'auto') return; // nothing was shown yet
+                if (reason === 'auto') return;
                 if (guided) {
                     guidanceEditor?.setBusy(false);
                     guidanceEditor?.setStatus(tr('No conversation is available to generate choices.'));
@@ -338,14 +270,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             const prompt = guided ? appendGuidedTask(base, snapshot.numChoices, theme) : base;
             text = await rpc.generate(prompt, connectionId(snapshot), snapshot.maxTokens, handle.signal);
         } catch (err) {
-            if (!handle.isCurrent()) return; // stale, ignore
+            if (!handle.isCurrent()) return;
             if (guided) guidanceEditor?.setBusy(false);
             console.error(`${LOG} Generation failed:`, err);
-            choicesUi.renderError(errorText(err), theme);
+            choicesUi.renderError(errorMessage(err), theme);
             return;
         }
 
-        if (!handle.isCurrent()) return; // stale, ignore
+        if (!handle.isCurrent()) return;
         if (guided) guidanceEditor?.setBusy(false);
 
         const choices = parseChoices(text, snapshot.numChoices);
@@ -354,12 +286,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             return;
         }
         choicesUi.renderChoices(choices, theme);
-        // Success collapses the editor; the theme stays in the textarea so it can be
-        // reopened and reused within the same conversation turn.
         if (guided && guidanceEditor?.isOpen()) guidanceEditor.setOpen(false);
     }
 
-    /** The model's raw answer for an enhance or combine task on the choices on screen. */
     async function runRewrite(handle: RequestHandle, task: RewriteTask): Promise<string> {
         const { chatId, characterId } = getActiveChat();
         if (!chatId) throw new NoConversationError();
@@ -370,7 +299,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         if (info.history.length === 0) throw new NoConversationError();
         lastUserName = info.userName;
 
-        // numChoices is pinned to the list being rewritten, as in the shared prompt builders.
         const numChoices = task.kind === 'enhance' ? task.originals.length : 1;
         const base = await buildBasePrompt(info, snapshot, numChoices, chatId, characterId);
         if (!handle.isCurrent()) throw new RpcError('Superseded', true);
@@ -381,13 +309,9 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         return rpc.generate(prompt, connectionId(snapshot), snapshot.maxTokens, handle.signal);
     }
 
-    // =========================================================================
-    // Applying a choice
-    // =========================================================================
-
     function isBusyError(err: unknown): boolean {
         const code = (err as { code?: unknown } | null)?.code;
-        return code === 'COMPOSER_BUSY' || errorText(err).includes('COMPOSER_BUSY');
+        return code === 'COMPOSER_BUSY' || errorMessage(err).includes('COMPOSER_BUSY');
     }
 
     async function applyChoice(text: string): Promise<void> {
@@ -411,16 +335,11 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         try {
             await composer.send();
         } catch (err) {
-            // The text stays in the composer, so nothing is lost.
             choicesUi.renderNotice(
-                isBusyError(err) ? tr('Send failed: chat is busy') : tr('Send failed: ') + errorText(err),
+                isBusyError(err) ? tr('Send failed: chat is busy') : tr('Send failed: ') + errorMessage(err),
             );
         }
     }
-
-    // =========================================================================
-    // UI parts
-    // =========================================================================
 
     const quick = createQuickButtons({
         tr,
@@ -446,17 +365,12 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         restoreFocusAfterStop,
     });
 
-    /** Clears everything tied to the current conversation turn. */
     function resetTurn(): void {
         cancelAutoTimer();
         abortPending();
         choicesUi.clear();
         resetGuidance();
     }
-
-    // =========================================================================
-    // Settings: live effects and persistence
-    // =========================================================================
 
     function applyEnabledState(): void {
         for (const { handle } of inputActions) handle.setEnabled(settings.enabled);
@@ -465,7 +379,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
     function scheduleSave(): void {
         saveDirty = true;
-        saveEpoch++;
         clearTimeout(saveTimer);
         saveTimer = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
     }
@@ -475,32 +388,17 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         saveTimer = undefined;
         if (!saveDirty) return;
         saveDirty = false;
-        const epoch = saveEpoch;
-        rpc.saveSettings({ ...settings })
-            .then((stored) => {
-                // The backend's normalised copy is the source of truth, unless the player
-                // has edited something since: that edit has its own save in flight.
-                if (disposed || epoch !== saveEpoch) return;
-                const normalized = normalizeSettings(stored);
-                const changed = (Object.keys(normalized) as SettingKey[]).some((key) => normalized[key] !== settings[key]);
-                if (!changed) return;
-                Object.assign(settings, normalized);
-                settingsPanel?.syncFromSettings();
-                applyEnabledState();
-            })
-            .catch((err) => {
-                if (!(err instanceof RpcError && err.aborted)) console.warn(`${LOG} Failed to save settings:`, err);
-            });
+        rpc.saveSettings({ ...settings }).catch((err) => {
+            if (!(err instanceof RpcError && err.aborted)) console.warn(`${LOG} Failed to save settings:`, err);
+        });
     }
 
-    /** A setting was changed in the settings tab: take effect now, then save. */
     function onSettingChanged(key: SettingKey): void {
         switch (key) {
             case 'enabled':
                 cancelAutoTimer();
                 abortPending();
                 choicesUi.clear();
-                // Disabling discards the theme editor and its draft.
                 if (!settings.enabled) resetGuidance();
                 applyEnabledState();
                 break;
@@ -510,7 +408,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
                 choicesUi.clear();
                 break;
             case 'showQuickGenerateButton':
-                // A display preference only: it never touches the choices or in-flight requests.
                 quick.sync();
                 break;
             default:
@@ -530,9 +427,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     }
 
     function initSettingsPanel(): void {
-        // Lumiverse's convention: extension settings live under Settings -> Extensions.
-        // Rendering here also lights up the per-extension "Settings" button in the
-        // Extensions panel, which deep-links to this section.
         const section = ctx.ui.mount('settings_extensions') as HTMLElement;
         settingsHeading = h('h3', { text: tr('Next Choices') });
         const root = h('div', { children: [settingsHeading] });
@@ -550,8 +444,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         settingsPanel = panel;
         track(() => panel.destroy());
         void panel.refreshProfiles();
-        // The connection list can change while Settings is closed: reload it whenever
-        // the section comes back into view.
         if (typeof IntersectionObserver === 'function') {
             const observer = new IntersectionObserver((entries) => {
                 if (entries.some((entry) => entry.isIntersecting)) void panel.refreshProfiles();
@@ -560,10 +452,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             track(() => observer.disconnect());
         }
     }
-
-    // =========================================================================
-    // Triggers: input bar menu, quick buttons, backend commands
-    // =========================================================================
 
     function registerInputBarActions(): void {
         const specs = [
@@ -587,10 +475,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         }
     }
 
-    // =========================================================================
-    // Events
-    // =========================================================================
-
     function wireEvents(): void {
         const on = (name: string, handler: (payload: unknown) => void) => {
             try {
@@ -611,7 +495,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             resetTurn();
             ensureMounted();
         });
-        // CHAT_CHANGED also fires for metadata-only changes: only a different chat id counts.
         on('CHAT_CHANGED', (payload) => {
             const id = chatIdFromChatChanged(payload);
             if (id && id !== lastChatId) {
@@ -637,7 +520,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             let previous = composer.getState();
             track(
                 composer.onChange((state) => {
-                    // Fires on every keystroke: only a new chat or a (re)mounted composer matters.
                     const chatChanged = state.chatId !== previous.chatId;
                     const mountedNow = state.mounted && !previous.mounted;
                     previous = state;
@@ -655,29 +537,22 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
         track(
             rpc.onCommand((id) => {
-                // The backend forwards a command to every open tab of the user.
-                if (!isForegroundTab(document.visibilityState)) return;
+                if (document.visibilityState !== 'visible') return;
                 if (id === 'generate') void generateChoices('manual');
                 else if (id === 'guided') toggleGuided(null);
             }),
         );
 
-        if (ctx.locale?.subscribe) {
-            track(
-                ctx.locale.subscribe((locale) => {
-                    setLocale(locale);
-                    for (const { handle, label } of inputActions) handle.setLabel(tr(label));
-                    if (settingsHeading) settingsHeading.textContent = tr('Next Choices');
-                    settingsPanel?.relabel();
-                    quick.relabel();
-                }),
-            );
-        }
+        track(
+            ctx.locale.subscribe((locale) => {
+                setLocale(locale);
+                for (const { handle, label } of inputActions) handle.setLabel(tr(label));
+                if (settingsHeading) settingsHeading.textContent = tr('Next Choices');
+                settingsPanel?.relabel();
+                quick.relabel();
+            }),
+        );
     }
-
-    // =========================================================================
-    // Startup and teardown
-    // =========================================================================
 
     function init(): void {
         registerInputBarActions();
@@ -697,7 +572,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
             const stored = await rpc.loadSettings();
             if (disposed) return;
             if (stored) {
-                Object.assign(settings, normalizeSettings(stored));
+                Object.assign(settings, stored);
             } else {
                 console.warn(`${LOG} The backend did not send the settings in time; using the defaults.`);
             }
@@ -713,7 +588,6 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         disposed = true;
         cancelAutoTimer();
         abortPending();
-        // An edit still waiting for its debounced save must not be lost.
         clearTimeout(saveTimer);
         if (saveDirty) {
             saveDirty = false;
@@ -734,9 +608,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         mountRoot = null;
         try {
             ctx.dom.cleanup();
-        } catch {
-            /* ignore */
-        }
+        } catch {}
     }
 
     return teardown;

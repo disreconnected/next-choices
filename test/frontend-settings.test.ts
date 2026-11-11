@@ -11,7 +11,7 @@ describe('applySettingChange', () => {
         const settings = fresh();
         expect(applySettingChange(settings, 'autoSend', true)).toBe(true);
         expect(settings.autoSend).toBe(true);
-        expect(applySettingChange(settings, 'autoSend', 'true')).toBe(true); // a non-boolean is false, which is a change
+        expect(applySettingChange(settings, 'autoSend', 'true')).toBe(true);
         expect(settings.autoSend).toBe(false);
     });
 
@@ -28,7 +28,7 @@ describe('applySettingChange', () => {
         expect(applySettingChange(settings, 'numChoices', '5')).toBe(true);
         expect(settings.numChoices).toBe(5);
         expect(applySettingChange(settings, 'historyDepth', 10)).toBe(true);
-        expect(applySettingChange(settings, 'historyDepth', 0)).toBe(true); // invalid input restores the default
+        expect(applySettingChange(settings, 'historyDepth', 0)).toBe(true);
         expect(settings.historyDepth).toBe(DEFAULT_SETTINGS.historyDepth);
     });
 
@@ -67,7 +67,7 @@ describe('buildProfileOptions', () => {
         expect(options.map((option) => option.value)).toEqual(['current', 'a', 'b']);
         expect(options[0]?.label).toBe('Current connection settings');
         expect(options[1]).toMatchObject({ label: 'Alpha', sublabel: 'm1' });
-        expect(options[2]?.label).toBe('b'); // the id stands in for a missing name
+        expect(options[2]?.label).toBe('b');
         expect(options[2]).not.toHaveProperty('sublabel');
     });
 

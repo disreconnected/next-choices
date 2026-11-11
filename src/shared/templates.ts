@@ -1,5 +1,3 @@
-// Kept verbatim so existing users who never customized the old default can
-// be migrated without overwriting genuinely custom prompt templates.
 export const LEGACY_DEFAULT_PROMPT_TEMPLATE =
     'You are an assistant helping a roleplay player. Below is the recent conversation between {{user}} and {{char}}:\n\n' +
     '{{history}}\n\n' +

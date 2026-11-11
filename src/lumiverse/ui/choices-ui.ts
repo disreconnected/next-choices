@@ -1,49 +1,31 @@
-/**
- * The choices row above the composer: loading and error views, the choice
- * rows with inline editing, and the Enhance and Combine panels. A plain-DOM
- * port of renderChoices & co. from the SillyTavern adapter (src/st/index.ts).
- *
- * This module owns the DOM and each render's local state. Everything that
- * needs the host (mounting, requests, composer) comes in through
- * ChoicesUiDeps, so the controller in ../frontend.ts stays the single owner of
- * request ids and cancellation.
- */
+import { errorMessage } from '../../shared/error';
 import { formatChoiceHtml } from '../../shared/format';
 import { parseRewrittenChoices } from '../../shared/parse';
 import { mergeCombined, selectedInOrder } from './choice-logic';
-import { errorText, h, stopKeydown, toolButton } from './dom';
+import { h, stopKeydown, toolButton } from './dom';
 import { NoConversationError, type RequestHandle, type RewriteTask, type Translate } from './types';
 
 export const CONTAINER_ID = 'next_choices_container';
 
 export interface ChoicesUiDeps {
     tr: Translate;
-    /** The container, mounted if necessary. Null when there is no composer to show it in. */
     getContainer(): HTMLElement | null;
-    /** The container only if it exists already (never mounts). */
     peekContainer(): HTMLElement | null;
     isEnabled(): boolean;
-    /** Name of the player, for the Enhance placeholder. May be empty. */
     getUserName(): string;
     applyChoice(text: string): void;
-    /** Regenerate / Retry: repeats the generation, guided when `guidance` is not empty. */
     regenerate(guidance: string): void;
-    /** Aborts whatever is in flight and returns the handle that owns the next request. */
     beginRequest(): RequestHandle;
-    /** Aborts whatever is in flight. */
     abortPending(): void;
     cancelAutoTimer(): void;
-    /** Raw model text for a rewrite. Rejects with NoConversationError, or with the request's error. */
     runRewrite(handle: RequestHandle, task: RewriteTask): Promise<string>;
     restoreFocusAfterStop(target: Element | null): void;
 }
 
 export interface ChoicesUi {
-    /** Empties and hides the container without mounting anything. */
     clear(): void;
     renderLoading(handle: RequestHandle, focusTarget: Element | null): void;
     renderError(message: string, generationGuidance?: string): void;
-    /** A dismissible one-line message (for example a failed send). */
     renderNotice(message: string): void;
     renderChoices(choices: readonly string[], generationGuidance?: string): void;
 }
@@ -85,8 +67,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
                 title: tr('Regenerate'),
                 'aria-label': tr('Regenerate'),
             });
-            // Regenerate repeats THIS render: a guided result regenerates from the
-            // theme captured when it was rendered, not from the live theme box.
             regenerate.addEventListener('click', () => deps.regenerate(options.generationGuidance));
             toolbar.append(regenerate);
         }
@@ -122,7 +102,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
             title: tr('Dismiss'),
             'aria-label': tr('Dismiss'),
         });
-        // Dismiss only hides the list. It is not a request cancellation control.
         dismiss.addEventListener('click', () => clear());
         toolbar.append(dismiss);
 
@@ -161,7 +140,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
         container.hidden = false;
 
         const retry = toolButton('next-choices-retry', tr('Retry'));
-        // Retry resubmits the failed request with the theme of the render it belongs to.
         retry.addEventListener('click', () => deps.regenerate(generationGuidance));
         const error = h('div', {
             className: 'next-choices-error',
@@ -187,13 +165,10 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
     function renderChoices(choices: readonly string[], generationGuidance = ''): void {
         const container = deps.getContainer();
         if (!container) return;
-        const view: HTMLElement = container; // narrowed alias for the hoisted functions below
+        const view: HTMLElement = container;
         container.replaceChildren();
         container.hidden = false;
 
-        // The committed text of every row. Preview, selection, editor init, Apply
-        // and the rewrite requests all read and write this one render-local array;
-        // it is never reconstructed from rendered HTML.
         const currentChoices = choices.map((choice) => String(choice ?? ''));
         let openEditors = 0;
         let enhancementBusy = false;
@@ -210,8 +185,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
         const isViewCurrent = (): boolean =>
             container.isConnected && content.parentElement === container && container.firstElementChild === content;
 
-        // ---- Rows ------------------------------------------------------------
-
         currentChoices.forEach((_, index) => {
             const number = index + 1;
             const row = h('div', { className: 'next-choices-row' });
@@ -227,10 +200,8 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
             checkbox.addEventListener('change', () => toggleCombinationChoice(index));
             stopKeydown(checkbox);
 
-            // Outside combination mode, activation uses the exact committed text.
             const item = h('button', { className: 'next-choices-item', attrs: { type: 'button' } });
             const renderPreview = () => {
-                // formatChoiceHtml escapes the text before adding its fixed set of tags.
                 item.innerHTML = formatChoiceHtml(currentChoices[index]!);
             };
             renderPreview();
@@ -245,13 +216,10 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
             const editLabel = `${tr('Edit choice')} ${number}`;
             const edit = toolButton('next-choices-edit', tr('Edit'), { 'aria-label': editLabel });
 
-            // Inline editor, hidden until Edit is pressed.
             const input = h('textarea', {
                 className: 'next-choices-edit-input',
                 attrs: { rows: '4', 'aria-label': editLabel },
             });
-            // Enter stays a native newline and never reaches host shortcuts.
-            // There is no submit shortcut: applying is explicit.
             stopKeydown(input);
             const apply = toolButton('next-choices-apply', tr('Apply changes'));
             const reset = toolButton('next-choices-reset', tr('Reset changes'));
@@ -287,8 +255,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
                 refreshApplyState();
                 setEditing(true);
             });
-            // Apply stores the exact draft (whitespace and newlines preserved);
-            // trimming is for validation only.
             apply.addEventListener('click', () => {
                 const draft = input.value;
                 if (!draft.trim()) return;
@@ -297,8 +263,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
                 setEditing(false);
                 edit.focus();
             });
-            // Reset discards the draft; the committed text is deliberately untouched,
-            // so it restores the generated text, or the last applied edit.
             reset.addEventListener('click', () => {
                 input.value = '';
                 setEditing(false);
@@ -309,8 +273,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
             list.append(row);
             rowRefs.push({ row, item, edit, select, checkbox });
         });
-
-        // ---- Toolbar ---------------------------------------------------------
 
         const toolbar = makeToolbar({
             regenerate: true,
@@ -323,11 +285,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
         });
         const enhanceButton = toolbar.enhance!;
         const combineButton = toolbar.combine!;
-
-        // ---- Enhance panel ---------------------------------------------------
-        // The wrap is the disclosure unit: it carries the live status as a sibling
-        // of the panel (outside its aria-busy subtree), so it is what gets shown
-        // and hidden. Hiding only the panel would leave notices announcing.
 
         const guidanceInput = h('textarea', {
             id: 'next_choices_guidance_input',
@@ -383,7 +340,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
             submit.disabled = busy || combinationOpen || !hasGuidance || editing;
             if (editing) setStatus(tr('Apply or reset your edits before enhancing choices.'));
             else if (!busy) setStatus('');
-            // While busy the panel keeps its busy notice; setBusy owns it.
         }
         guidanceInput.addEventListener('input', refreshGuidanceAvailability);
 
@@ -391,11 +347,9 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
             guidanceWrap.hidden = !open;
             enhanceButton.setAttribute('aria-expanded', String(open));
             if (open) {
-                // The persona can change between openings: refresh the exemplar each time.
                 guidanceInput.placeholder = placeholderExemplar();
                 guidanceInput.focus();
             } else {
-                // Closing keeps the draft for the displayed list; it only dies with the list.
                 enhanceButton.focus();
             }
         }
@@ -434,8 +388,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
                 return;
             }
 
-            // Snapshot the committed text before any await: edits made while the
-            // request is in flight must not leak into it or into its validation count.
             const originals = currentChoices.slice();
 
             deps.cancelAutoTimer();
@@ -447,8 +399,7 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
             try {
                 response = await deps.runRewrite(handle, { kind: 'enhance', originals, guidance });
             } catch (err) {
-                if (!handle.isCurrent()) return; // stale, ignore
-                // A rejected request for a dismissed list must not resurrect controls.
+                if (!handle.isCurrent()) return;
                 if (!isViewCurrent()) return;
                 setBusy(false);
                 if (err instanceof NoConversationError) {
@@ -456,13 +407,11 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
                     return;
                 }
                 console.error('[nextChoices] Enhancement failed:', err);
-                setStatus(tr('Failed to enhance choices: ') + errorText(err));
+                setStatus(tr('Failed to enhance choices: ') + errorMessage(err));
                 return;
             }
 
-            if (!handle.isCurrent()) return; // stale, ignore
-            // Even when the request could not be aborted, a replaced view must never
-            // resurrect old choices or surface an error into the new view.
+            if (!handle.isCurrent()) return;
             if (!isViewCurrent()) return;
 
             const enhanced = parseRewrittenChoices(response, originals.length);
@@ -472,10 +421,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
                 return;
             }
 
-            // One atomic replace: the new render owns fresh state, and the next
-            // enhancement uses the enhanced text as its committed baseline. The
-            // captured generation theme is forwarded: the enhancement direction is
-            // not the theme these options were generated from.
             renderChoices(enhanced, generationGuidance);
             view.querySelector<HTMLElement>('.next-choices-enhance')?.focus();
         }
@@ -487,8 +432,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
             setBusy(false);
             guidanceInput.focus();
         });
-
-        // ---- Combine panel ---------------------------------------------------
 
         const combineHint = h('div', {
             className: 'next-choices-combine-hint',
@@ -508,7 +451,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
                 h('div', { className: 'next-choices-combine-actions', children: [combineSubmit, combineStop, combineCancel] }),
             ],
         });
-        // Live announcements stay outside the panel's aria-busy subtree.
         const combineStatus = h('div', {
             className: 'next-choices-combine-status',
             attrs: { role: 'status', 'aria-live': 'polite' },
@@ -594,7 +536,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
             const selectedIndexes = selectedInOrder(selectedChoiceIndexes, currentChoices.length);
             if (selectedIndexes.length < 2) return;
 
-            // Only committed text, in displayed order, belongs to this request.
             const originals = currentChoices.slice();
             const selected = selectedIndexes.map((index) => originals[index]!);
 
@@ -614,7 +555,7 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
                     combineStatus.textContent = tr('No conversation is available to combine these choices.');
                 } else {
                     console.error('[nextChoices] Combination failed:', err);
-                    combineStatus.textContent = tr('Failed to combine choices: ') + errorText(err);
+                    combineStatus.textContent = tr('Failed to combine choices: ') + errorMessage(err);
                 }
                 combineSubmit.focus();
                 return;
@@ -630,7 +571,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
                 return;
             }
 
-            // One replacement gives every surviving row fresh, correct indexes.
             const merged = mergeCombined(originals, selectedIndexes, rewritten[0]!);
             renderChoices(merged.choices, generationGuidance);
             view.querySelectorAll<HTMLElement>('.next-choices-item')[merged.insertionIndex]?.focus();
@@ -643,8 +583,6 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
             setCombinationBusy(false);
             combineSubmit.focus();
         });
-
-        // ---- Assemble --------------------------------------------------------
 
         content.append(list, guidanceWrap, combinationWrap);
         container.append(content, toolbar.toolbar);

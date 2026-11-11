@@ -4,9 +4,6 @@ import {
     appendCombinationTask,
     appendEnhancementTask,
     appendGuidedTask,
-    buildCombinationPrompt,
-    buildEnhancementPrompt,
-    buildGuidedPrompt,
     buildHistory,
     buildPrompt,
     buildPromptAsync,
@@ -27,6 +24,24 @@ function vars(overrides: Partial<PromptVars> = {}): PromptVars {
         persona: 'Tall.',
         ...overrides,
     };
+}
+
+function guidedPrompt(template: string, v: PromptVars, guidance: string, expand?: (text: string) => string): string {
+    return appendGuidedTask(buildPrompt(template, v, expand), v.numChoices, guidance);
+}
+
+function enhancementPrompt(
+    template: string,
+    v: PromptVars,
+    choices: string[],
+    guidance: string,
+    expand?: (text: string) => string,
+): string {
+    return appendEnhancementTask(buildPrompt(template, { ...v, numChoices: choices.length }, expand), choices, guidance);
+}
+
+function combinationPrompt(template: string, v: PromptVars, choices: string[], expand?: (text: string) => string): string {
+    return appendCombinationTask(buildPrompt(template, { ...v, numChoices: 1 }, expand), choices);
 }
 
 function payloadBetween(prompt: string, start: string, end: string): any {
@@ -221,12 +236,12 @@ describe('buildPromptAsync', () => {
     });
 });
 
-describe('buildGuidedPrompt', () => {
+describe('guided prompt', () => {
     const START = '\n\n=== Next Choices guided generation ===\n';
     const END = '\n=== End of Next Choices guided generation ===';
 
     test('appends the JSON task block to the expanded base prompt', () => {
-        const prompt = buildGuidedPrompt(TEMPLATE, vars(), 'invite her to dance');
+        const prompt = guidedPrompt(TEMPLATE, vars(), 'invite her to dance');
         const base = buildPrompt(TEMPLATE, vars());
         expect(prompt.startsWith(base + START)).toBe(true);
         expect(prompt.endsWith(END)).toBe(true);
@@ -241,14 +256,14 @@ describe('buildGuidedPrompt', () => {
     });
 
     test('uses numChoices from vars both in the base prompt and in the task', () => {
-        const prompt = buildGuidedPrompt('N={{numChoices}}', vars({ numChoices: 5 }), 'g');
+        const prompt = guidedPrompt('N={{numChoices}}', vars({ numChoices: 5 }), 'g');
         expect(prompt.startsWith('N=5' + START)).toBe(true);
         expect(payloadBetween(prompt, START, END).requirements[3]).toContain('exactly 5 nonempty strings');
     });
 
     test('the task is appended after expansion, so guidance never reaches the expander or manual macros', () => {
         const seen: string[] = [];
-        const prompt = buildGuidedPrompt(TEMPLATE, vars(), '{{user}} dances {{persona}}', (text) => {
+        const prompt = guidedPrompt(TEMPLATE, vars(), '{{user}} dances {{persona}}', (text) => {
             seen.push(text);
             return text.replaceAll('{{user}}', 'LEAK');
         });
@@ -256,25 +271,20 @@ describe('buildGuidedPrompt', () => {
         expect(seen[0]).not.toContain('guided generation');
         expect(payloadBetween(prompt, START, END).guidance).toBe('{{user}} dances {{persona}}');
     });
-
-    test('appendGuidedTask produces the same block', () => {
-        const base = buildPrompt(TEMPLATE, vars());
-        expect(appendGuidedTask(base, 3, 'g')).toBe(buildGuidedPrompt(TEMPLATE, vars(), 'g'));
-    });
 });
 
-describe('buildEnhancementPrompt', () => {
+describe('enhancement prompt', () => {
     const START = '\n\n=== Next Choices enhancement task ===\n';
     const END = '\n=== End of Next Choices enhancement task ===';
 
     test('pins numChoices to the number of displayed choices', () => {
-        const prompt = buildEnhancementPrompt('N={{numChoices}}', vars({ numChoices: 5 }), ['a', 'b'], 'bolder');
+        const prompt = enhancementPrompt('N={{numChoices}}', vars({ numChoices: 5 }), ['a', 'b'], 'bolder');
         expect(prompt.startsWith('N=2' + START)).toBe(true);
         expect(prompt.endsWith(END)).toBe(true);
     });
 
     test('carries the originals, the guidance and an exact-count requirement', () => {
-        const prompt = buildEnhancementPrompt(TEMPLATE, vars(), ['a', 'b'], 'bolder');
+        const prompt = enhancementPrompt(TEMPLATE, vars(), ['a', 'b'], 'bolder');
         const payload = payloadBetween(prompt, START, END);
         expect(payload.task).toStartWith('Enhance each response option below according to the guidance.');
         expect(payload.guidance).toBe('bolder');
@@ -287,7 +297,7 @@ describe('buildEnhancementPrompt', () => {
 
     test('appended after expansion and, unlike the combination prompt, braces are not escaped', () => {
         const seen: string[] = [];
-        const prompt = buildEnhancementPrompt(TEMPLATE, vars(), ['say {{user}}'], 'more {{char}}', (text) => {
+        const prompt = enhancementPrompt(TEMPLATE, vars(), ['say {{user}}'], 'more {{char}}', (text) => {
             seen.push(text);
             return text;
         });
@@ -296,25 +306,20 @@ describe('buildEnhancementPrompt', () => {
         expect(prompt).toContain('say {{user}}');
         expect(prompt).not.toContain('\\u007B');
     });
-
-    test('appendEnhancementTask produces the same block', () => {
-        const base = buildPrompt(TEMPLATE, { ...vars(), numChoices: 1 });
-        expect(appendEnhancementTask(base, ['a'], 'g')).toBe(buildEnhancementPrompt(TEMPLATE, vars(), ['a'], 'g'));
-    });
 });
 
-describe('buildCombinationPrompt', () => {
+describe('combination prompt', () => {
     const START = '\n\n=== Next Choices combination task ===\n';
     const END = '\n=== End of Next Choices combination task ===';
 
     test('pins numChoices to 1', () => {
-        const prompt = buildCombinationPrompt('N={{numChoices}}', vars({ numChoices: 5 }), ['a', 'b']);
+        const prompt = combinationPrompt('N={{numChoices}}', vars({ numChoices: 5 }), ['a', 'b']);
         expect(prompt.startsWith('N=1' + START)).toBe(true);
         expect(prompt.endsWith(END)).toBe(true);
     });
 
     test('escapes "{{" in the payload so the host\'s second macro pass cannot expand choice text', () => {
-        const prompt = buildCombinationPrompt(TEMPLATE, vars(), ['say {{user}}', 'and {{char}} too']);
+        const prompt = combinationPrompt(TEMPLATE, vars(), ['say {{user}}', 'and {{char}} too']);
         const block = prompt.slice(prompt.indexOf('=== Next Choices combination task ==='));
         expect(block).not.toContain('{{');
         expect(block).toContain('\\u007B\\u007B');
@@ -322,7 +327,7 @@ describe('buildCombinationPrompt', () => {
 
     test('JSON decoding recovers the exact choice strings', () => {
         const choices = ['say {{user}}', 'and {{char}} too'];
-        const payload = payloadBetween(buildCombinationPrompt(TEMPLATE, vars(), choices), START, END);
+        const payload = payloadBetween(combinationPrompt(TEMPLATE, vars(), choices), START, END);
         expect(payload.choices).toEqual(choices);
         expect(payload.task).toStartWith('Rewrite the selected response options into ONE coherent player response.');
         expect(payload.requirements).toHaveLength(5);
@@ -333,16 +338,11 @@ describe('buildCombinationPrompt', () => {
 
     test('the task is appended after expansion', () => {
         const seen: string[] = [];
-        buildCombinationPrompt(TEMPLATE, vars(), ['a', 'b'], (text) => {
+        combinationPrompt(TEMPLATE, vars(), ['a', 'b'], (text) => {
             seen.push(text);
             return text;
         });
         expect(seen).toHaveLength(1);
         expect(seen[0]).not.toContain('combination task');
-    });
-
-    test('appendCombinationTask produces the same block', () => {
-        const base = buildPrompt(TEMPLATE, { ...vars(), numChoices: 1 });
-        expect(appendCombinationTask(base, ['a', 'b'])).toBe(buildCombinationPrompt(TEMPLATE, vars(), ['a', 'b']));
     });
 });

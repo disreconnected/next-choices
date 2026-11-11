@@ -1,13 +1,6 @@
-/**
- * Extracts up to `max` choice strings from the raw model output.
- * 1) Try JSON array between the first '[' and the last ']'.
- * 2) Fallback: numbered / bulleted list lines.
- * Returns [] if nothing usable was found.
- */
 export function parseChoices(text: unknown, max: number): string[] {
     if (typeof text !== 'string' || !text.trim()) return [];
 
-    // Attempt 1: JSON array.
     const start = text.indexOf('[');
     const end = text.lastIndexOf(']');
     if (start !== -1 && end > start) {
@@ -27,17 +20,15 @@ export function parseChoices(text: unknown, max: number): string[] {
                     .filter(Boolean);
                 if (items.length) return items.slice(0, max);
             }
-        } catch { /* fall through */ }
+        } catch { }
     }
 
-    // Attempt 2: numbered / bulleted list.
     const items: string[] = [];
     for (const rawLine of text.split('\n')) {
         const line = rawLine.trim();
         const match = line.match(/^(?:\d+\s*[.)、]\s*|[-*•]\s+)(.+)$/);
         if (match) {
             let item = match[1]!.trim();
-            // Strip wrapping quotes and trailing comma left over from JSON-ish output.
             item = item.replace(/^["'「『]|["'」』,]+$/g, '').trim();
             if (item) items.push(item);
         }
@@ -45,14 +36,6 @@ export function parseChoices(text: unknown, max: number): string[] {
     return items.slice(0, max);
 }
 
-/**
- * Extracts exactly `expectedCount` rewritten choice strings from the raw
- * model output. Unlike parseChoices this is atomic: anything other than
- * a JSON array of exactly `expectedCount` nonempty strings rejects the
- * whole response (returns null). No filtering, truncation, object
- * aliases, or numbered-line fallback: those could silently commit an
- * incomplete or incorrectly mapped rewrite.
- */
 export function parseRewrittenChoices(text: unknown, expectedCount: number): string[] | null {
     if (typeof text !== 'string' || !text.trim()) return null;
     const start = text.indexOf('[');

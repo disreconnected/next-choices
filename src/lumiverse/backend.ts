@@ -1,15 +1,3 @@
-/**
- * Lumiverse (Spindle) backend module: the RPC server behind the frontend.
- *
- * Everything that needs a host service lives here: chat history, the active
- * persona, the macro engine, LLM generation, and per-user settings storage.
- * The message contract is in ./rpc.ts. Keep this file to the `spindle` API:
- * the install scanner blocks node builtins, Bun.*, process.env, eval and
- * friends.
- *
- * The module is side-effectful at import (that is how Spindle loads it), but
- * only when the `spindle` global exists; tests call `initBackend` with a fake.
- */
 import type {
     GenerationRequestDTO,
     SpindleAPI,
@@ -17,16 +5,13 @@ import type {
     SpindleCommandDTO,
     SpindleCommandOriginDTO,
 } from 'lumiverse-spindle-types';
+import { errorMessage } from '../shared/error';
 import { DEFAULT_SETTINGS, normalizeSettings } from '../shared/settings';
 import { isFrontendMessage } from './rpc';
 import type { BackendMessage, FrontendMessage, HistoryEntry } from './rpc';
 
 declare const spindle: SpindleAPI | undefined;
 
-/**
- * The slice of `SpindleAPI` this module uses. `SpindleAPI` is assignable to
- * it, and a test fake only has to implement these members.
- */
 export interface BackendApi {
     onFrontendMessage(
         handler: (payload: unknown, userId: string, frontendSessionId?: string) => void | Promise<void>,
@@ -73,7 +58,6 @@ export interface BackendApi {
 const LOG_PREFIX = '[next_choices]';
 const SETTINGS_PATH = 'settings.json';
 
-/** Host limit for `getMessages({ tail })`, and the slack we read beyond historyDepth for hidden/system messages. */
 const MAX_TAIL = 1000;
 const TAIL_MARGIN = 10;
 
@@ -94,7 +78,6 @@ const COMMANDS: SpindleCommandDTO[] = [
     },
 ];
 
-/** A chat message as returned by `chat.getMessages`, typed loosely: lean and full reads differ, hosts evolve. */
 interface HostMessage {
     role?: string;
     hidden?: boolean;
@@ -102,15 +85,6 @@ interface HostMessage {
     name?: unknown;
     content?: unknown;
     extra?: { hidden?: unknown } | null;
-}
-
-function errorMessage(err: unknown): string {
-    if (err instanceof Error) return err.message;
-    if (typeof err === 'string') return err;
-    if (typeof err === 'object' && err !== null && typeof (err as { message?: unknown }).message === 'string') {
-        return (err as { message: string }).message;
-    }
-    return String(err);
 }
 
 function isAbortError(err: unknown): boolean {
@@ -125,7 +99,6 @@ const isHidden = (m: HostMessage): boolean => m.hidden === true || m.extra?.hidd
 const isUserMessage = (m: HostMessage): boolean => m.is_user ?? m.role === 'user';
 const nameOf = (m: HostMessage | undefined): string => (typeof m?.name === 'string' ? m.name : '');
 
-/** Reads the model text from whatever `generate.raw/quiet` returned. */
 function extractText(result: unknown): string {
     if (typeof result === 'string') return result;
     const content = (result as { content?: unknown } | null | undefined)?.content;
@@ -142,7 +115,6 @@ function extractText(result: unknown): string {
 }
 
 export function initBackend(api: BackendApi): () => void {
-    /** In-flight `generate` requests by the frontend's requestId, so `cancel` can abort them. */
     const pending = new Map<string, AbortController>();
 
     const log = (level: 'info' | 'warn' | 'error', msg: string): void => {
@@ -151,14 +123,11 @@ export function initBackend(api: BackendApi): () => void {
         else console[level](text);
     };
 
-    // -- chat context -------------------------------------------------------
-
     async function fetchMessages(chatId: string, historyDepth: number): Promise<HostMessage[]> {
         const tail = Math.max(1, Math.min(MAX_TAIL, Math.floor(historyDepth) + TAIL_MARGIN));
         try {
             return asMessages(await api.chat.getMessages(chatId, { tail, light: true }));
         } catch (err) {
-            // Hosts without lean reads reject the options object: fall back to the whole chat.
             log('warn', `chat.getMessages with options failed (${errorMessage(err)}); retrying without options`);
             return asMessages(await api.chat.getMessages(chatId)).slice(-tail);
         }
@@ -198,8 +167,6 @@ export function initBackend(api: BackendApi): () => void {
         };
     }
 
-    // -- generation ---------------------------------------------------------
-
     function dispatchGenerate(
         msg: Extract<FrontendMessage, { type: 'generate' }>,
         signal: AbortSignal,
@@ -209,17 +176,14 @@ export function initBackend(api: BackendApi): () => void {
             messages: [{ role: 'user' as const, content: msg.prompt }],
             parameters: { max_tokens: Math.max(1, Math.floor(msg.maxTokens)) },
             signal,
-            // Required for operator-scoped installs; ignored for user-scoped ones.
             userId,
         };
-        // null / '' = "Current connection": the user's active connection and preset.
         const dispatch = (extra: Pick<GenerationRequestDTO, 'reasoning'>): Promise<unknown> =>
             msg.connectionId
                 ? api.generate.raw({ type: 'raw', connection_id: msg.connectionId, ...base, ...extra })
                 : api.generate.quiet({ type: 'quiet', ...base, ...extra });
 
         return dispatch({ reasoning: { source: 'off' } }).catch((err: unknown) => {
-            // An older host may not know `reasoning`: retry once without it.
             if (signal.aborted || isAbortError(err) || !/reasoning/i.test(errorMessage(err))) throw err;
             log('warn', `host rejected reasoning override (${errorMessage(err)}); retrying without it`);
             return dispatch({});
@@ -248,14 +212,9 @@ export function initBackend(api: BackendApi): () => void {
         }
     }
 
-    // -- request dispatch ---------------------------------------------------
-
-    // `userId` is the sender; every user-scoped host call gets it, which an
-    // operator-scoped install requires and a user-scoped install ignores.
     async function handle(msg: FrontendMessage, reply: (message: BackendMessage) => void, userId: string): Promise<void> {
         switch (msg.type) {
             case 'load_settings': {
-                // Always answers with settings: the frontend polls until it gets one.
                 let stored: unknown = DEFAULT_SETTINGS;
                 try {
                     stored = await api.userStorage.getJson(SETTINGS_PATH, { fallback: DEFAULT_SETTINGS, userId });
@@ -275,9 +234,6 @@ export function initBackend(api: BackendApi): () => void {
                 reply(await getContext(msg, userId));
                 return;
             case 'resolve_macros': {
-                // The frontend already swapped {{history}} for a placeholder; the
-                // host's macro engine must never see chat history. On any failure
-                // hand back the template and let the frontend fill the basics.
                 let text = msg.template;
                 try {
                     const resolved = await api.macros.resolve(msg.template, {
@@ -297,7 +253,6 @@ export function initBackend(api: BackendApi): () => void {
                 await generate(msg, reply, userId);
                 return;
             case 'cancel':
-                // The `generate` handler answers with `aborted: true`.
                 pending.get(msg.targetRequestId)?.abort();
                 return;
         }
@@ -305,7 +260,6 @@ export function initBackend(api: BackendApi): () => void {
 
     const offMessage = api.onFrontendMessage(async (payload, userId, frontendSessionId) => {
         if (!isFrontendMessage(payload)) {
-            // spindle.log has no debug level.
             log('info', 'ignored an invalid frontend payload');
             return;
         }
@@ -323,7 +277,6 @@ export function initBackend(api: BackendApi): () => void {
         }
     });
 
-    // A frontend that loaded before us re-sends load_settings on this.
     api.sendToFrontend({ type: 'hello' } satisfies BackendMessage);
 
     try {
@@ -332,8 +285,6 @@ export function initBackend(api: BackendApi): () => void {
         log('warn', `could not register commands: ${errorMessage(err)}`);
     }
     const offCommand = api.commands.onInvoked((id, _context, origin) => {
-        // User only: a document target needs frontend-session-routing-v1, which
-        // origin.frontendSessionId (command-session-routing-v1) does not imply.
         api.sendToFrontend({ type: 'command', id } satisfies BackendMessage, origin?.userId);
     });
 

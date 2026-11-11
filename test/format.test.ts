@@ -100,7 +100,6 @@ describe('formatChoiceHtml: output only ever contains the allowed tags', () => {
     const ALLOWED = /<\/?(?:q|em|strong|u)>|<br>/g;
 
     test('random inputs never leak a raw "<" or ">"', () => {
-        // Small deterministic LCG so a failure is reproducible.
         let seed = 12345;
         const next = () => {
             seed = (seed * 1103515245 + 12345) & 0x7fffffff;

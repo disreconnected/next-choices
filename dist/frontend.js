@@ -1,3 +1,15 @@
+// src/shared/error.ts
+function errorMessage(err) {
+  if (err instanceof Error)
+    return err.message;
+  if (typeof err === "string")
+    return err;
+  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+    return err.message;
+  }
+  return String(err);
+}
+
 // src/shared/parse.ts
 function parseChoices(text, max) {
   if (typeof text !== "string" || !text.trim())
@@ -96,13 +108,6 @@ var DEFAULT_SETTINGS = Object.freeze({
   historyDepth: 4,
   promptTemplate: DEFAULT_PROMPT_TEMPLATE
 });
-function upgradeLegacyTemplate(stored) {
-  if (stored.promptTemplate === LEGACY_DEFAULT_PROMPT_TEMPLATE) {
-    stored.promptTemplate = DEFAULT_PROMPT_TEMPLATE;
-    return true;
-  }
-  return false;
-}
 function normalizeNumChoices(raw) {
   const value = parseInt(String(raw), 10);
   return Number.isFinite(value) && value > 0 ? Math.min(value, 10) : DEFAULT_SETTINGS.numChoices;
@@ -121,24 +126,6 @@ function normalizePromptTemplate(raw) {
 function normalizeProfileId(raw) {
   return String(raw || "current");
 }
-function normalizeSettings(raw) {
-  const source = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-  const bool = (value, fallback) => typeof value === "boolean" ? value : fallback;
-  const text = (value) => typeof value === "string" ? value : undefined;
-  const settings = {
-    enabled: bool(source.enabled, DEFAULT_SETTINGS.enabled),
-    autoGenerate: bool(source.autoGenerate, DEFAULT_SETTINGS.autoGenerate),
-    autoSend: bool(source.autoSend, DEFAULT_SETTINGS.autoSend),
-    profileId: normalizeProfileId(text(source.profileId)),
-    showQuickGenerateButton: bool(source.showQuickGenerateButton, DEFAULT_SETTINGS.showQuickGenerateButton),
-    numChoices: normalizeNumChoices(source.numChoices),
-    maxTokens: normalizeMaxTokens(source.maxTokens),
-    historyDepth: normalizeHistoryDepth(source.historyDepth),
-    promptTemplate: normalizePromptTemplate(text(source.promptTemplate))
-  };
-  upgradeLegacyTemplate(settings);
-  return settings;
-}
 
 // src/shared/prompt.ts
 var HISTORY_PLACEHOLDER = "NEXT_CHOICES_HISTORY";
@@ -155,16 +142,17 @@ function finalizePrompt(expanded, vars) {
 }
 var NON_STRING_WARNING = "[" + MODULE_NAME + "] substituteParams returned a non-string; using manual macro replacement.";
 var FAILED_WARNING = "[" + MODULE_NAME + "] substituteParams failed, using manual macro replacement:";
+function acceptExpansion(unexpanded, expanded) {
+  if (typeof expanded === "string")
+    return expanded;
+  console.warn(NON_STRING_WARNING);
+  return unexpanded;
+}
 async function buildPromptAsync(template, vars, expand) {
   let prompt = prepareTemplate(template, vars.numChoices);
   if (expand) {
     try {
-      const expanded = await expand(prompt);
-      if (typeof expanded === "string") {
-        prompt = expanded;
-      } else {
-        console.warn(NON_STRING_WARNING);
-      }
+      prompt = acceptExpansion(prompt, await expand(prompt));
     } catch (err) {
       console.warn(FAILED_WARNING, err);
     }
@@ -296,9 +284,6 @@ var zh_tw_default = {
 
 // src/lumiverse/i18n.ts
 var LUMIVERSE_ZH_TW = {
-  "Next Choices": "Next Choices",
-  Choices: "選項",
-  "Next Choices settings": "Next Choices 設定",
   "Auto-generate (create choices after each AI reply. You can always trigger manually from the input bar menu)": "自動生成（AI 回覆後自動產生選項；也可隨時從輸入列選單手動生成）",
   "Send failed: chat is busy": "送出失敗：聊天正忙碌中",
   "Send failed: ": "送出失敗：",
@@ -332,40 +317,30 @@ function tr(key, vars) {
 }
 
 // src/lumiverse/rpc.ts
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-var isString = (value) => typeof value === "string";
-var isBoolean = (value) => typeof value === "boolean";
-function isHistoryEntry(value) {
-  return isRecord(value) && isString(value.name) && isString(value.text) && isBoolean(value.isUser);
+var FRONTEND_TYPES = new Set([
+  "load_settings",
+  "save_settings",
+  "get_context",
+  "resolve_macros",
+  "generate",
+  "cancel"
+]);
+var BACKEND_TYPES = new Set([
+  "hello",
+  "settings",
+  "context",
+  "macros",
+  "result",
+  "error",
+  "command"
+]);
+function hasKnownType(value, types) {
+  return typeof value === "object" && value !== null && typeof value.type === "string" && types.has(value.type);
 }
 function isBackendMessage(value) {
-  if (!isRecord(value))
+  if (!hasKnownType(value, BACKEND_TYPES))
     return false;
-  switch (value.type) {
-    case "hello":
-      return true;
-    case "command":
-      return isString(value.id);
-    default:
-      break;
-  }
-  if (!isString(value.requestId))
-    return false;
-  switch (value.type) {
-    case "settings":
-      return isRecord(value.settings);
-    case "context":
-      return Array.isArray(value.history) && value.history.every(isHistoryEntry) && isString(value.userName) && isString(value.charName) && isString(value.persona) && isBoolean(value.lastIsUser);
-    case "macros":
-    case "result":
-      return isString(value.text);
-    case "error":
-      return isString(value.message) && isBoolean(value.aborted);
-    default:
-      return false;
-  }
+  return value.type === "hello" || value.type === "command" || typeof value.requestId === "string";
 }
 
 // src/lumiverse/rpc-client.ts
@@ -378,6 +353,7 @@ class RpcError extends Error {
   }
 }
 var DEFAULT_REQUEST_TIMEOUT_MS = 20000;
+var LOAD_SETTINGS_TIMEOUT_MS = 1e4;
 function defaultIdFactory() {
   let counter = 0;
   return () => {
@@ -391,7 +367,6 @@ function createRpcClient(transport, options = {}) {
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const pending = new Map;
   const commandHandlers = new Set;
-  const helloHandlers = new Set;
   let disposed = false;
   function post(message) {
     transport.sendToBackend(message);
@@ -402,8 +377,6 @@ function createRpcClient(transport, options = {}) {
     if (payload.type === "hello") {
       for (const entry of [...pending.values()])
         entry.resend?.();
-      for (const handler of [...helloHandlers])
-        safely(() => handler());
       return;
     }
     if (payload.type === "command") {
@@ -425,23 +398,46 @@ function createRpcClient(transport, options = {}) {
     }
   }
   const unsubscribe = transport.onBackendMessage(handleMessage);
-  function request(build, expect, timeoutMs = requestTimeoutMs) {
+  function request(build, expect, { timeoutMs = requestTimeoutMs, signal, resendOnHello = false } = {}) {
     if (disposed)
       return Promise.reject(new RpcError("RPC client was disposed", true));
+    if (signal?.aborted)
+      return Promise.reject(new RpcError("Aborted", true));
     const requestId = newId();
     return new Promise((resolve, reject) => {
       let timer;
+      const onAbort = () => {
+        if (!pending.delete(requestId))
+          return;
+        entry.cleanup();
+        try {
+          post({ type: "cancel", requestId: newId(), targetRequestId: requestId });
+        } catch {}
+        reject(new RpcError("Aborted", true));
+      };
       const entry = {
         expect,
         resolve: (message) => resolve(message),
         reject,
-        cleanup: () => clearTimeout(timer)
+        cleanup: () => {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+        }
       };
+      if (resendOnHello) {
+        entry.resend = () => {
+          try {
+            post(build(requestId));
+          } catch {}
+        };
+      }
       pending.set(requestId, entry);
+      signal?.addEventListener("abort", onAbort, { once: true });
       if (timeoutMs > 0) {
         timer = setTimeout(() => {
           if (!pending.delete(requestId))
             return;
+          entry.cleanup();
           reject(new RpcError("The Next Choices backend did not respond"));
         }, timeoutMs);
       }
@@ -455,96 +451,35 @@ function createRpcClient(transport, options = {}) {
     });
   }
   return {
-    loadSettings({ retryMs = 500, maxMs = 1e4 } = {}) {
-      if (disposed)
-        return Promise.resolve(null);
-      const requestId = newId();
-      return new Promise((resolve) => {
-        let retryTimer;
-        let giveUpTimer;
-        const message = { type: "load_settings", requestId };
-        const send = () => {
-          try {
-            post(message);
-          } catch {}
-        };
-        const cleanup = () => {
-          clearInterval(retryTimer);
-          clearTimeout(giveUpTimer);
-        };
-        pending.set(requestId, {
-          expect: "settings",
-          resend: send,
-          cleanup,
-          resolve: (reply) => resolve(reply.type === "settings" ? reply.settings : null),
-          reject: () => resolve(null)
+    async loadSettings() {
+      try {
+        const reply = await request((requestId) => ({ type: "load_settings", requestId }), "settings", {
+          timeoutMs: LOAD_SETTINGS_TIMEOUT_MS,
+          resendOnHello: true
         });
-        send();
-        retryTimer = setInterval(send, retryMs);
-        giveUpTimer = setTimeout(() => {
-          if (!pending.delete(requestId))
-            return;
-          cleanup();
-          resolve(null);
-        }, maxMs);
-      });
+        return reply.settings;
+      } catch {
+        return null;
+      }
     },
     async saveSettings(settings) {
       const reply = await request((requestId) => ({ type: "save_settings", requestId, settings }), "settings");
       return reply.settings;
     },
-    async getContext(chatId, characterId, historyDepth) {
-      const reply = await request((requestId) => ({ type: "get_context", requestId, chatId, characterId, historyDepth }), "context");
-      return {
-        history: reply.history,
-        userName: reply.userName,
-        charName: reply.charName,
-        persona: reply.persona,
-        lastIsUser: reply.lastIsUser
-      };
+    getContext(chatId, characterId, historyDepth) {
+      return request((requestId) => ({ type: "get_context", requestId, chatId, characterId, historyDepth }), "context");
     },
     async resolveMacros(template, chatId, characterId) {
       const reply = await request((requestId) => ({ type: "resolve_macros", requestId, template, chatId, characterId }), "macros");
       return reply.text;
     },
-    generate(prompt, connectionId, maxTokens, signal) {
-      if (disposed)
-        return Promise.reject(new RpcError("RPC client was disposed", true));
-      if (signal?.aborted)
-        return Promise.reject(new RpcError("Aborted", true));
-      const requestId = newId();
-      return new Promise((resolve, reject) => {
-        const onAbort = () => {
-          if (!pending.delete(requestId))
-            return;
-          try {
-            post({ type: "cancel", requestId: newId(), targetRequestId: requestId });
-          } catch {}
-          reject(new RpcError("Aborted", true));
-        };
-        pending.set(requestId, {
-          expect: "result",
-          cleanup: () => signal?.removeEventListener("abort", onAbort),
-          resolve: (reply) => resolve(reply.type === "result" ? reply.text : ""),
-          reject
-        });
-        signal?.addEventListener("abort", onAbort, { once: true });
-        try {
-          post({ type: "generate", requestId, prompt, connectionId, maxTokens });
-        } catch (err) {
-          pending.delete(requestId);
-          signal?.removeEventListener("abort", onAbort);
-          reject(new RpcError(errorMessage(err)));
-        }
-      });
+    async generate(prompt, connectionId, maxTokens, signal) {
+      const reply = await request((requestId) => ({ type: "generate", requestId, prompt, connectionId, maxTokens }), "result", { timeoutMs: 0, signal });
+      return reply.text;
     },
     onCommand(handler) {
       commandHandlers.add(handler);
       return () => void commandHandlers.delete(handler);
-    },
-    onHello(handler) {
-      helloHandlers.add(handler);
-      return () => void helloHandlers.delete(handler);
     },
     dispose() {
       if (disposed)
@@ -558,12 +493,8 @@ function createRpcClient(transport, options = {}) {
         entry.reject(new RpcError("RPC client was disposed", true));
       }
       commandHandlers.clear();
-      helloHandlers.clear();
     }
   };
-}
-function errorMessage(err) {
-  return err instanceof Error ? err.message : String(err);
 }
 function safely(fn) {
   try {
@@ -608,16 +539,6 @@ function stopKeydown(node) {
 }
 function isRendered(node) {
   return node instanceof HTMLElement && node.isConnected && node.getClientRects().length > 0;
-}
-function errorText(err) {
-  if (err instanceof Error)
-    return err.message;
-  if (typeof err === "string")
-    return err;
-  if (err && typeof err === "object" && typeof err.message === "string") {
-    return err.message;
-  }
-  return String(err);
 }
 
 // src/lumiverse/settings-panel.ts
@@ -798,26 +719,6 @@ function createSettingsPanel(deps) {
       }
       sourceSelect.update({ options: buildProfileOptions(tr, profiles), value: settings.profileId });
     },
-    syncFromSettings() {
-      if (destroyed)
-        return;
-      for (const box of checkboxes) {
-        if (box.handle.getValue() !== settings[box.key])
-          box.handle.update({ checked: settings[box.key] });
-      }
-      for (const field of numberFields) {
-        if (field.handle.getValue() !== settings[field.key])
-          field.handle.update({ value: settings[field.key] });
-      }
-      if (promptArea.getValue() !== settings.promptTemplate)
-        promptArea.update({ value: settings.promptTemplate });
-      if (sourceSelect.getValue() !== settings.profileId) {
-        sourceSelect.update({
-          options: buildProfileOptions(tr, profilesLoaded ? profiles : [], settings.profileId),
-          value: settings.profileId
-        });
-      }
-    },
     destroy() {
       if (destroyed)
         return;
@@ -834,7 +735,6 @@ function createSettingsPanel(deps) {
 
 // src/lumiverse/styles.ts
 var STYLES = `
-/* Next Choices */
 
 #next_choices_container,
 #next_choices_generation_guidance,
@@ -855,7 +755,6 @@ var STYLES = `
     font-family: var(--lumiverse-font-family, inherit);
 }
 
-/* An explicit display on a class must not override the hidden attribute. */
 #next_choices_container[hidden],
 #next_choices_generation_guidance[hidden],
 .next-choices-container[hidden],
@@ -880,7 +779,6 @@ var STYLES = `
     gap: 5px;
     flex: 1 1 auto;
     min-width: 0;
-    /* Keep lengthy generated choices from covering the conversation. */
     max-height: min(42vh, 28rem);
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -906,7 +804,6 @@ var STYLES = `
     transition: background-color var(--nc-transition), border-color var(--nc-transition), transform 0.1s ease;
 }
 
-/* The shared formatter keeps the quote characters inside <q>. */
 .next-choices-item q {
     color: var(--nc-accent);
 }
@@ -941,7 +838,6 @@ var STYLES = `
     flex: 0 0 auto;
 }
 
-/* Base look of every small control (also the Retry button and the quick buttons). */
 .next-choices-tool {
     border: 1px solid var(--nc-border);
     border-radius: var(--nc-radius-small);
@@ -961,8 +857,6 @@ var STYLES = `
     background-color: var(--nc-hover);
 }
 
-/* Regenerate / Dismiss keep the .next-choices-tool theme but get a full,
-   tappable square target. Scoped so Apply/Reset keep their own sizing. */
 .next-choices-regenerate,
 .next-choices-dismiss {
     box-sizing: border-box;
@@ -1035,7 +929,6 @@ var STYLES = `
     font-size: calc(var(--nc-font-size) * 0.9);
 }
 
-/* A message that is not a failure of the generation itself (for example a refused send). */
 .next-choices-notice {
     color: var(--nc-warning);
 }
@@ -1049,11 +942,6 @@ var STYLES = `
     opacity: 1;
 }
 
-/* --- Content wrapper and guidance panel ---------------------------------- */
-
-/* Wraps the scrollable list plus the guidance panel; the toolbar stays its
-   sibling so its vertical layout and the desktop/mobile orientations are
-   untouched. */
 .next-choices-content {
     display: flex;
     flex-direction: column;
@@ -1062,7 +950,6 @@ var STYLES = `
     gap: 6px;
 }
 
-/* Hidden via the hidden attribute, so no permanent display:flex here. */
 .next-choices-guidance,
 .next-choices-combine-panel {
     box-sizing: border-box;
@@ -1105,7 +992,6 @@ var STYLES = `
     display: none;
 }
 
-/* The host's own text-field classes do not exist here: style the fields ourselves. */
 .next-choices-guidance-input,
 .next-choices-edit-input {
     display: block;
@@ -1144,8 +1030,6 @@ var STYLES = `
     gap: 8px;
 }
 
-/* Toolbar transformations: text buttons with real targets, unlike the square
-   icon buttons. */
 .next-choices-enhance,
 .next-choices-combine {
     box-sizing: border-box;
@@ -1208,8 +1092,6 @@ var STYLES = `
     background-color: var(--nc-hover);
 }
 
-/* While a rewrite request is in flight the rows stay visible but inert:
-   no pointer affordance on the locked previews. */
 .next-choices-list-locked .next-choices-item {
     cursor: default;
 }
@@ -1225,13 +1107,8 @@ var STYLES = `
     transform: none;
 }
 
-/* --- Per-choice editing ------------------------------------------------- */
-
 .next-choices-row {
     display: flex;
-    /* Center every control against the preview: with flex-start the shorter
-       preview is pinned to the top and the taller Edit control's center sits
-       below it. */
     align-items: center;
     gap: 5px;
     width: 100%;
@@ -1243,8 +1120,6 @@ var STYLES = `
     min-width: 0;
 }
 
-/* Sits vertically centered against the choice preview, which keeps its own
-   text size: the control grows instead of the text shrinking. */
 .next-choices-edit {
     box-sizing: border-box;
     display: inline-flex;
@@ -1273,8 +1148,6 @@ var STYLES = `
     margin-top: 10px;
 }
 
-/* Accent variants for the editor controls: muted confirm (green) and
-   discard (red) tints. */
 .next-choices-apply {
     border-color: rgba(95, 158, 110, 0.55);
     background-color: rgba(95, 158, 110, 0.16);
@@ -1301,7 +1174,6 @@ var STYLES = `
     opacity: 1;
 }
 
-/* Focus and disabled states so hover-only visibility is never the only affordance. */
 .next-choices-stop:focus-visible,
 .next-choices-enhance-stop:focus-visible,
 .next-choices-enhance:focus-visible,
@@ -1337,8 +1209,6 @@ var STYLES = `
     cursor: not-allowed;
 }
 
-/* --- Quick generate buttons (chat_input_tools_left) ---------------------- */
-
 .next-choices-quick-generate {
     box-sizing: border-box;
     display: inline-flex;
@@ -1355,8 +1225,6 @@ var STYLES = `
     line-height: 1;
     opacity: 1;
 }
-
-/* --- Composer theme editor (guided generation) --------------------------- */
 
 #next_choices_generation_guidance {
     box-sizing: border-box;
@@ -1376,8 +1244,6 @@ var STYLES = `
 #next_choices_generation_guidance .next-choices-guidance-input:disabled {
     opacity: 0.6;
 }
-
-/* --- Settings tab -------------------------------------------------------- */
 
 .next-choices-settings {
     display: flex;
@@ -1432,7 +1298,6 @@ var STYLES = `
     opacity: 1;
 }
 
-/* Narrow screens: keep buttons tappable, stack the toolbar horizontally. */
 @media screen and (max-width: 600px) {
     .next-choices-container {
         flex-direction: column;
@@ -1454,7 +1319,6 @@ var STYLES = `
         min-height: 40px;
     }
 
-    /* Keep editor controls comfortably tappable; the list stays full-width. */
     .next-choices-list {
         width: 100%;
     }
@@ -1855,7 +1719,7 @@ function createChoicesUi(deps) {
           return;
         }
         console.error("[nextChoices] Enhancement failed:", err);
-        setStatus(tr("Failed to enhance choices: ") + errorText(err));
+        setStatus(tr("Failed to enhance choices: ") + errorMessage(err));
         return;
       }
       if (!handle.isCurrent())
@@ -2006,7 +1870,7 @@ function createChoicesUi(deps) {
           combineStatus.textContent = tr("No conversation is available to combine these choices.");
         } else {
           console.error("[nextChoices] Combination failed:", err);
-          combineStatus.textContent = tr("Failed to combine choices: ") + errorText(err);
+          combineStatus.textContent = tr("Failed to combine choices: ") + errorMessage(err);
         }
         combineSubmit.focus();
         return;
@@ -2096,8 +1960,6 @@ function createEventFilter(deps) {
       const generationId = asString(record.generationId);
       if (generationId && extensionGenerations.has(generationId))
         return "ignore";
-      if (asString(record.extensionId))
-        return "ignore";
       const messageId = asString(record.messageId);
       const chatId = asString(record.chatId);
       const active = deps.getActiveChatId();
@@ -2145,9 +2007,6 @@ function chatIdFromChatChanged(payload) {
   if (!record)
     return null;
   return asString(record.chatId) ?? asString(asRecord(record.chat)?.id);
-}
-function isForegroundTab(visibilityState) {
-  return visibilityState === undefined || visibilityState === null || visibilityState === "visible";
 }
 function asRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
@@ -2212,7 +2071,6 @@ function createGuidanceEditor(deps) {
   const editor = {
     wrapper,
     isOpen: () => open,
-    isBusy: () => busy,
     setOpen(next, newOpener = null) {
       if (!next) {
         const focusInside = wrapper.contains(document.activeElement);
@@ -2348,12 +2206,7 @@ function setup(ctx) {
     if (typeof fn === "function")
       cleanups.push(fn);
   };
-  ctx.deferReady?.();
-  try {
-    setLocale(ctx.locale?.get?.());
-  } catch {
-    setLocale("en");
-  }
+  setLocale(ctx.locale.get());
   const settings = { ...DEFAULT_SETTINGS };
   const rpc = createRpcClient(ctx);
   track(() => rpc.dispose());
@@ -2382,7 +2235,6 @@ function setup(ctx) {
   let autoTimer;
   let saveTimer;
   let saveDirty = false;
-  let saveEpoch = 0;
   function ensureMounted() {
     if (disposed)
       return null;
@@ -2435,7 +2287,7 @@ function setup(ctx) {
     const id = sequence;
     const controller = new AbortController;
     abortController = controller;
-    return { id, signal: controller.signal, isCurrent: () => id === sequence };
+    return { signal: controller.signal, isCurrent: () => id === sequence };
   }
   function focusComposer() {
     try {
@@ -2562,7 +2414,7 @@ function setup(ctx) {
       if (guided)
         guidanceEditor?.setBusy(false);
       console.error(`${LOG} Generation failed:`, err);
-      choicesUi.renderError(errorText(err), theme);
+      choicesUi.renderError(errorMessage(err), theme);
       return;
     }
     if (!handle.isCurrent())
@@ -2598,7 +2450,7 @@ function setup(ctx) {
   }
   function isBusyError(err) {
     const code = err?.code;
-    return code === "COMPOSER_BUSY" || errorText(err).includes("COMPOSER_BUSY");
+    return code === "COMPOSER_BUSY" || errorMessage(err).includes("COMPOSER_BUSY");
   }
   async function applyChoice(text) {
     const composer = ctx.composer;
@@ -2621,7 +2473,7 @@ function setup(ctx) {
     try {
       await composer.send();
     } catch (err) {
-      choicesUi.renderNotice(isBusyError(err) ? tr("Send failed: chat is busy") : tr("Send failed: ") + errorText(err));
+      choicesUi.renderNotice(isBusyError(err) ? tr("Send failed: chat is busy") : tr("Send failed: ") + errorMessage(err));
     }
   }
   const quick = createQuickButtons({
@@ -2659,7 +2511,6 @@ function setup(ctx) {
   }
   function scheduleSave() {
     saveDirty = true;
-    saveEpoch++;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
   }
@@ -2669,18 +2520,7 @@ function setup(ctx) {
     if (!saveDirty)
       return;
     saveDirty = false;
-    const epoch = saveEpoch;
-    rpc.saveSettings({ ...settings }).then((stored) => {
-      if (disposed || epoch !== saveEpoch)
-        return;
-      const normalized = normalizeSettings(stored);
-      const changed = Object.keys(normalized).some((key) => normalized[key] !== settings[key]);
-      if (!changed)
-        return;
-      Object.assign(settings, normalized);
-      settingsPanel?.syncFromSettings();
-      applyEnabledState();
-    }).catch((err) => {
+    rpc.saveSettings({ ...settings }).catch((err) => {
       if (!(err instanceof RpcError && err.aborted))
         console.warn(`${LOG} Failed to save settings:`, err);
     });
@@ -2824,24 +2664,22 @@ function setup(ctx) {
       }));
     }
     track(rpc.onCommand((id) => {
-      if (!isForegroundTab(document.visibilityState))
+      if (document.visibilityState !== "visible")
         return;
       if (id === "generate")
         generateChoices("manual");
       else if (id === "guided")
         toggleGuided(null);
     }));
-    if (ctx.locale?.subscribe) {
-      track(ctx.locale.subscribe((locale) => {
-        setLocale(locale);
-        for (const { handle, label } of inputActions)
-          handle.setLabel(tr(label));
-        if (settingsHeading)
-          settingsHeading.textContent = tr("Next Choices");
-        settingsPanel?.relabel();
-        quick.relabel();
-      }));
-    }
+    track(ctx.locale.subscribe((locale) => {
+      setLocale(locale);
+      for (const { handle, label } of inputActions)
+        handle.setLabel(tr(label));
+      if (settingsHeading)
+        settingsHeading.textContent = tr("Next Choices");
+      settingsPanel?.relabel();
+      quick.relabel();
+    }));
   }
   function init() {
     registerInputBarActions();
@@ -2861,7 +2699,7 @@ function setup(ctx) {
       if (disposed)
         return;
       if (stored) {
-        Object.assign(settings, normalizeSettings(stored));
+        Object.assign(settings, stored);
       } else {
         console.warn(`${LOG} The backend did not send the settings in time; using the defaults.`);
       }

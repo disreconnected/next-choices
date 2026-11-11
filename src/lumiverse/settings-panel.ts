@@ -1,10 +1,3 @@
-/**
- * Settings UI for the Lumiverse build, built from the host's shared
- * components (ctx.components.*). The same preferences as the SillyTavern
- * drawer in settings.html; every change is normalised with the shared
- * normalize* functions and handed to the controller, which applies it live
- * and saves it.
- */
 import type {
     SpindleCheckboxHandle,
     SpindleComponentsHelper,
@@ -33,12 +26,6 @@ export interface ProfileOption {
     model?: string;
 }
 
-/**
- * Applies one control's raw value to `settings` (in place), normalised like the
- * SillyTavern inputs. Returns true when the stored value changed. An empty
- * number field (null) is not a value: it leaves the setting alone until a
- * number is entered.
- */
 export function applySettingChange(settings: NextChoicesSettings, key: SettingKey, raw: unknown): boolean {
     let next: NextChoicesSettings[SettingKey];
     switch (key) {
@@ -74,7 +61,6 @@ export function applySettingChange(settings: NextChoicesSettings, key: SettingKe
     return true;
 }
 
-/** "Current connection" first, then the profiles; `pendingId` keeps a saved id selectable until the list has loaded. */
 export function buildProfileOptions(
     tr: Translate,
     profiles: readonly ProfileOption[],
@@ -95,24 +81,17 @@ export function buildProfileOptions(
 }
 
 export interface SettingsPanelDeps {
-    /** Element the panel is built in (the settings tab root). */
     root: HTMLElement;
     components: SpindleComponentsHelper;
     tr: Translate;
-    /** The live settings object. The panel writes through applySettingChange and then calls onChange. */
     settings: NextChoicesSettings;
-    /** Saved connection profiles; null when the host cannot list them. */
     listProfiles(): Promise<ProfileOption[] | null>;
-    /** A setting was changed by the panel. */
     onChange(key: SettingKey): void;
 }
 
 export interface SettingsPanel {
     relabel(): void;
-    /** Reloads the connection list, and resets a saved profile that no longer exists. */
     refreshProfiles(): Promise<void>;
-    /** Pushes the values of `settings` into the controls (after a reload from the backend). */
-    syncFromSettings(): void;
     destroy(): void;
 }
 
@@ -126,8 +105,6 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     const wrapper = h('div', { className: 'next-choices-settings' });
     const mountPoint = () => h('div');
     const disposables: Array<{ destroy(): void }> = [];
-
-    // ---- Checkboxes ----------------------------------------------------------
 
     const checkboxes: Array<{
         key: SettingKey & ('enabled' | 'autoGenerate' | 'autoSend' | 'showQuickGenerateButton');
@@ -155,8 +132,6 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
         disposables.push(handle);
     }
 
-    // ---- Generation source ---------------------------------------------------
-
     const sourceLabel = h('label', { text: tr('Generation source') });
     const sourceTarget = mountPoint();
     const sourceSelect: SpindleSelectHandle = components.mountSelect(sourceTarget, {
@@ -166,8 +141,6 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
     });
     disposables.push(sourceSelect);
     wrapper.append(h('div', { className: 'next-choices-settings-field', children: [sourceLabel, sourceTarget] }));
-
-    // ---- Numbers -------------------------------------------------------------
 
     const numberSpecs = [
         { key: 'numChoices', label: 'Number of choices', min: 1, max: 10 },
@@ -197,8 +170,6 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
         numberRow.append(h('div', { className: 'next-choices-settings-field', children: [labelNode, target] }));
     }
     wrapper.append(numberRow);
-
-    // ---- Prompt template -----------------------------------------------------
 
     const promptLabel = h('label', { text: tr('Prompt template') });
     const hint = h('small');
@@ -268,32 +239,13 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
                 console.warn(`[nextChoices] ${tr('Could not load the connection list.')}`, err);
                 return;
             }
-            // Nothing to verify against when the host cannot list connections.
             if (destroyed || listed === null) return;
             profiles = listed;
             profilesLoaded = true;
-            // Fall back to "current" when the saved profile no longer exists, as the SillyTavern build does.
             if (settings.profileId !== 'current' && !profiles.some((profile) => profile.id === settings.profileId)) {
                 change('profileId', 'current');
             }
             sourceSelect.update({ options: buildProfileOptions(tr, profiles), value: settings.profileId });
-        },
-
-        syncFromSettings() {
-            if (destroyed) return;
-            for (const box of checkboxes) {
-                if (box.handle.getValue() !== settings[box.key]) box.handle.update({ checked: settings[box.key] });
-            }
-            for (const field of numberFields) {
-                if (field.handle.getValue() !== settings[field.key]) field.handle.update({ value: settings[field.key] });
-            }
-            if (promptArea.getValue() !== settings.promptTemplate) promptArea.update({ value: settings.promptTemplate });
-            if (sourceSelect.getValue() !== settings.profileId) {
-                sourceSelect.update({
-                    options: buildProfileOptions(tr, profilesLoaded ? profiles : [], settings.profileId),
-                    value: settings.profileId,
-                });
-            }
         },
 
         destroy() {
@@ -302,9 +254,7 @@ export function createSettingsPanel(deps: SettingsPanelDeps): SettingsPanel {
             for (const item of disposables) {
                 try {
                     item.destroy();
-                } catch {
-                    /* the host may already have torn the component down */
-                }
+                } catch {}
             }
             wrapper.remove();
         },
