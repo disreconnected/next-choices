@@ -1,162 +1,94 @@
 # Next Choices
 
-Suggested player replies for AI roleplay chats, for **SillyTavern** and **Lumiverse**. After each AI
-message the extension asks a model for a few in-persona response options and shows them as a row
-above the message box. Click one to fill it in (or send it), edit it inline, **Enhance** the set with a
-direction, **Combine** several into one reply, or generate a **guided** set around a theme. The
-request never enters the chat log.
+[English](#next-choices) · [繁體中文](#next-choices-繁體中文)
 
-Fork of [pdatone/next-choices](https://github.com/pdatone/next-choices) with the enhancements listed
-below, plus a Lumiverse (Spindle) port that installs from this same repo (see
-[Lumiverse support](#lumiverse-spindle-support)). The upstream README is reproduced unchanged at the
-bottom of this file.
+Suggested player replies for AI roleplay chats, for **SillyTavern** and **Lumiverse**.
 
-| Frontend | Install | Entry |
-| --- | --- | --- |
-| SillyTavern | Extensions → Install extension → paste this repo URL | `manifest.json` + `index.js` |
-| Lumiverse | Extensions panel → install from source → paste this repo URL | `spindle.json` + `dist/` |
+After each AI message, Next Choices asks a model for a few in-persona reply options and shows them
+above the message box. Click one to put it in the message box (or send it straight away). The
+request runs outside the chat, so nothing is written into the chat log or the chat context.
 
-## Enhancements on this fork
-
-### Larger, centered choice controls
-- ♻️ **Regenerate** and ✖ **Dismiss** are now 40×40 tappable targets (themed border/background preserved, translated `aria-label`s added), with a 6px gap between them.
-- **Edit** is now a 64×40 button with vertically centered content, and each row centers its controls against the choice text — so Edit lines up with the middle of single-line, multi-paragraph and long unbroken choices alike (measured center-Y delta ≤ 0.01px).
-- Choice text size, padding, markdown formatting and lack of truncation are unchanged: the larger controls take preview width instead of the text shrinking.
-
-### Optional composer "Generate choices" button
-- New opt-in setting **Show Generate choices button beside the message box** (`showQuickGenerateButton`, default **Off**).
-- When enabled, a 🎲 button appears in the Guided Generations composer toolbar, immediately before the person/impersonate buttons (first in the group when no person buttons are enabled). Without Guided Generations it falls back to a full-width row inside the message box, never the narrow mobile column.
-- The button survives Guided Generations rebuilding its toolbar (`innerHTML = ''`) and re-mounts after the composer is re-rendered.
-- It only triggers generation: activating it never selects a choice, fills or submits the composer, or writes settings. Turning the option (or the extension) off removes the button and keeps the preference.
-
-### Settings added by this fork
-| Setting | Default | Description |
-| --- | --- | --- |
-| Show Generate choices button beside the message box | Off | Shows the 🎲 generate button in the composer toolbar (see above). Display-only: it never clears choices or changes auto-generation. |
-| 生成選項按鈕 | 關 | 在輸入框工具列顯示「🎲 生成選項」按鈕（位於人物／扮演按鈕左側），不必開啟魔杖選單即可生成選項。純粹是顯示開關：不會更動選項列或自動生成設定。 |
-
-The Chinese half reproduced below is the upstream README, so its settings table lists upstream settings only; this fork's addition is the translated row above.
-
-### Usage additions
-- The choice row's ♻️ regenerates and ✖ dismisses the choices as before, now with larger targets alongside a centered **Edit** per choice.
-- With the composer button enabled, clicking 🎲 in the toolbar generates a fresh set of choices at any time, without opening the wand menu.
-
-### Combine selected choices
-- Choose **Combine**, then select at least two options with their checkboxes or preview buttons. **Combine selected** asks the configured model to rewrite their actions and dialogue into one coherent, persona-matched response rather than concatenate them.
-- Only selected choices are replaced. The combined response occupies the earliest selected position; every unselected choice keeps its exact applied text and relative order. Selecting all options leaves one editable, usable response.
-- Apply or Reset any open inline edits before combining. Selection uses committed text in displayed order, never pending editor drafts or formatted preview HTML. Edit and Enhance stay disabled during selection.
-- Selecting or combining never fills or sends the composer, even with **Send on click** enabled. Review the result first; an ordinary click on it uses the existing fill/send preference.
-- **Cancel** discards selection without changing the list. Malformed output or provider errors preserve the original choices and checked selection for an explicit retry. No concatenation fallback or automatic application-level retry is used.
-- Keyboard: Tab between controls, Space on checkboxes, and Enter/Space on buttons. Selection and combination status follow the UI language, including Traditional Chinese.
-
-### Stop actions
-- **Stop generating** is available while manual, automatic, regenerated, or guided choices are pending. It clears the loading view and ignores late results; the guided theme draft stays intact. Saved Connection Profile requests receive a request-local abort signal. With **Current connection settings**, SillyTavern's `generateRaw` API exposes no request-local signal, so Stop only cancels the local wait/result and cannot guarantee provider work ends.
-- **Stop enhancing** keeps the displayed choices and enhancement draft, unlocks the panel, and ignores late results.
-- **Stop combining** preserves choices, checked selection, and the hidden enhancement draft for retry. Saved Connection Profile requests receive the same request-local abort signal; **Current connection settings** can only discard the result locally, not guarantee provider-side cancellation.
-
-### Version
-- This fork's manifests (`manifest.json` and `spindle.json`) are at **0.4.0**.
-
-## Lumiverse (Spindle) support
-
-This repo is dual-target. The same checkout installs into **SillyTavern** (via `manifest.json` + `index.js`) and into **Lumiverse** (via `spindle.json` + `dist/`).
-
-### Install in Lumiverse
-1. Open Lumiverse → **Extensions** → install from source and paste this repo's URL:
-   ```
-   https://github.com/disreconnected/next-choices
-   ```
-2. Grant the requested permissions: `generation` (choice generation and "Send on click"), `chats` + `chat_mutation` (read the recent messages), `personas` (fill `{{persona}}`).
-3. Enable the extension. Choices appear above the message composer after each AI reply. "Generate choices" and "Generate choices (guided)" are also available in the composer's Extras menu and in the command palette (Ctrl+K).
-4. Settings live in **Settings → Extensions → Next Choices** (also reachable from the extension's card in the Extensions panel via its Settings button). "Current connection settings" uses Lumiverse's active LLM connection; any other saved LLM connection profile can be selected instead.
-
-Choice generation runs as an out-of-chat request from the extension backend; nothing is written into the chat. Settings are stored per user under Lumiverse's extension storage.
-
-### Building from source
-```
-bun install
-bun test
-bun run build   # writes index.js (SillyTavern), dist/frontend.js and dist/backend.js (Lumiverse)
-```
-`index.js` and `dist/` are generated from `src/` and committed so both hosts can install straight from GitHub. Edit `src/`, not the generated files.
-
-
----
-
-# Original README (upstream, unchanged)
-
-# Next Choices
-
-A third-party UI extension for SillyTavern. After each AI character reply, it generates 3 suggested player responses based on the recent conversation and shows them as a button row above the input area. Clicking a choice fills it into the input box so you can edit before sending.
-
-Choice generation goes through a separate raw request channel — the prompt and result are **never written into the chat log**, so your chat context stays clean.
-
-The UI language follows SillyTavern's **User Settings → UI Language** setting: with zh-TW the interface shows Traditional Chinese, otherwise it shows English.
+The interface follows the host's UI language: Traditional Chinese for zh-TW, English otherwise.
 
 ## Features
 
-- **Auto-generate**: choices appear automatically once an AI reply finishes rendering (switchable to a manual trigger button in the settings).
-- **Click to fill**: by default the choice text is inserted into the input box for editing; "Send on click" can be enabled instead.
-- **Language follows the conversation**: the prompt explicitly instructs the model to write choices in the same language as the chat.
-- **Selectable generation source**:
-  - "Current connection settings" — uses your currently selected API connection.
-  - Any saved **Connection Profile** — dedicate a cheap, fast model to choice generation without occupying your main model.
-  - (On older SillyTavern versions without Connection Profile request support, only "Current connection settings" is offered.)
-- **Customizable prompt template**: supports the `{{history}}`, `{{user}}`, `{{char}}`, `{{numChoices}}`, and `{{persona}}` macros — plus other SillyTavern built-in macros — with a "Restore default template" button. See [Prompt template macros](#prompt-template-macros).
-- **Persona-aware choices**: the default template includes your persona description (`{{persona}}`) so generated choices match your character's voice, writing style, and inner narration.
-- **Robust parsing**: JSON array output is parsed first, with automatic fallback to numbered/bulleted lists; on failure an error message with a "Retry" button is shown.
-- Stale choices are cleared (and in-flight requests aborted) on swipe, message edit, message delete, and chat switch.
-- Styling uses SillyTavern theme variables and works in light/dark themes and on mobile.
+- **Auto-generate** choices after each AI reply, or trigger them manually from the wand menu
+  (SillyTavern), the composer Extras menu or command palette (Lumiverse), or an optional 🎲 button
+  beside the message box.
+- **Click to fill or send.** By default a choice is placed in the message box for editing;
+  **Send on click** sends it immediately.
+- **Edit** any choice inline before using it.
+- **Enhance** rewrites every choice in a direction you type (for example "reassure her"), keeping
+  each choice's main content.
+- **Combine** merges two or more selected choices into one coherent reply. Unselected choices stay
+  as they are.
+- **Guided** generation creates a fresh set around one theme (for example "invite her to dance").
+- **Stop** cancels a pending generate, enhance or combine request. Your choices and drafts are kept.
+- **Choice of model.** Use the current connection, or any saved connection profile so a cheap, fast
+  model handles choices without tying up your main one.
+- **Persona-aware prompt.** The default template includes your persona description, so choices match
+  your character's voice. The template is fully editable.
+- **Tolerant parsing.** JSON array output is preferred, with a fallback to numbered or bulleted
+  lists. If parsing fails, an error with a **Retry** button is shown.
+- Stale choices are cleared, and in-flight requests aborted, on swipe, edit, delete and chat switch.
 
 ## Installation
 
-1. Open SillyTavern and click the **Extensions** panel at the top.
-2. Click **Install extension**.
-3. Paste this repo's git URL:
+### SillyTavern
+
+1. Open **Extensions** → **Install extension**.
+2. Paste this repository URL:
 
    ```
-   https://github.com/pdatone/next-choices
+   https://github.com/kikyoicecream/next-choices
    ```
 
-4. After installation, refresh the page. "Next Choices" appears in the Extensions settings panel.
+3. Refresh the page. **Next Choices** appears in the Extensions settings panel.
+
+### Lumiverse
+
+1. Open **Extensions** → install from source, and paste the same repository URL.
+2. Grant the requested permissions:
+   - `generation`: generating choices.
+   - `chats` and `chat_mutation`: reading the recent messages.
+   - `personas`: filling `{{persona}}`.
+3. Enable the extension. Settings are under **Settings → Extensions → Next Choices**.
 
 ## Settings
-
-Expand "Next Choices" in the Extensions panel:
 
 | Setting | Default | Description |
 | --- | --- | --- |
 | Enable extension | On | Master switch. |
-| Auto-generate | On | Generate choices automatically after each AI reply; when off, a "🎲 Generate choices" button appears above the input box for manual triggering. |
-| Send on click | Off | When on, clicking a choice sends it immediately; by default it is only inserted into the input box for editing. |
-| Generation source | Current connection settings | Generate choices with your current API connection or any saved Connection Profile. |
+| Auto-generate | On | Generate choices after each AI reply. Manual triggers always work. |
+| Send on click | Off | Send a clicked choice immediately instead of placing it in the message box. |
+| Show choice generation buttons beside the message box | Off | Adds 🎲 (generate) and guided-generate buttons next to the message box. |
+| Generation source | Current connection settings | The current connection, or any saved connection profile. |
 | Number of choices | 3 | How many choices to generate each time. |
 | Max tokens | 500 | Token limit for the generation request. |
-| History depth | 4 | Include the last N chat messages as generation context. |
-| Prompt template | Built-in English template | Freely editable; see [Prompt template macros](#prompt-template-macros) below. A "Restore default template" button is provided. |
+| History depth | 4 | How many recent chat messages to include as context. |
+| Prompt template | Built-in template | Editable. See the macros below. **Restore default template** resets it. |
 
-## Prompt template macros
-
-The following macros are replaced when the prompt is built:
+### Prompt template macros
 
 | Macro | Replaced with |
 | --- | --- |
-| `{{history}}` | The last N chat messages (N = "History depth"), as `Name: text` lines. |
-| `{{numChoices}}` | The "Number of choices" setting. |
+| `{{history}}` | The last N chat messages (N = History depth), as `Name: text` lines. |
+| `{{numChoices}}` | The Number of choices setting. |
 | `{{user}}` | Your (player) name. |
 | `{{char}}` | The AI character's name. |
-| `{{persona}}` | Your persona description from Persona Management, so choices can match your character's voice, writing style, and inner narration. Empty if no persona description is set. |
+| `{{persona}}` | Your persona description, or empty if none is set. |
 
-Other **SillyTavern built-in macros** (for example, `{{description}}` and `{{scenario}}`) are also expanded when supported by the running version. `{{history}}` is always inserted after macro expansion, so macro-like text inside chat messages is not expanded.
+In SillyTavern, other built-in macros such as `{{description}}` and `{{scenario}}` are expanded too.
+`{{history}}` is inserted after macro expansion, so macro-like text inside chat messages is left
+alone.
 
-> Note: the old built-in template is automatically upgraded to include `{{persona}}`. Custom templates are preserved unchanged; add `{{persona}}` yourself or select "Restore default template" to include persona information.
+If you still have the old built-in template, it is upgraded to include `{{persona}}`. Custom
+templates are never changed: add `{{persona}}` yourself, or use **Restore default template**.
 
-## Usage
+## Development
 
-1. Chat with a character as usual.
-2. When the AI reply finishes, a row of choice buttons appears above the input box (a spinner is shown while generating).
-3. Click any choice; the text fills into the input box — edit and send.
-4. On the right of the button row, ♻️ regenerates and ✖ dismisses the choices.
+See [CONTRIBUTING.md](CONTRIBUTING.md). In short: edit `src/`, then run `bun run build`. The
+generated `index.js` and `dist/` are committed so both hosts can install straight from GitHub.
 
 ## License
 
@@ -164,59 +96,65 @@ MIT
 
 ---
 
-# Next Choices
+# Next Choices (繁體中文)
 
-SillyTavern 第三方 UI 擴充功能：在每次 AI 角色回覆完成後，依據最近的對話自動生成 3 個「玩家可選的回應選項」，以按鈕列顯示在輸入框上方。點選後文字會填入輸入框，讓你編輯後再自行送出。
+適用於 **SillyTavern** 與 **Lumiverse** 的 AI 角色扮演「玩家回覆建議」擴充功能。
 
-選項生成走獨立的 raw 請求通道——prompt 與結果**絕不寫入聊天記錄**，因此不會污染聊天上下文。
+每次 AI 回覆後，Next Choices 會請模型生成幾個符合你角色的回覆選項，顯示在訊息輸入框上方。點選後文字會填入輸入框（也可設定為直接送出）。選項請求在聊天之外進行，**不會寫入聊天記錄**，也不影響聊天上下文。
 
-介面語言跟隨 SillyTavern 的 **User Settings → UI Language** 設定：選擇 zh-TW 時顯示繁體中文，其餘語言顯示英文。
+介面語言跟隨宿主程式的 UI 語言設定：zh-TW 顯示繁體中文，其餘顯示英文。
 
 ## 功能特色
 
-- **自動生成**：AI 回覆渲染完成後自動產生選項（可在設定切換為手動按鈕觸發）。
-- **點選填入**：預設將選項文字填入輸入框供你編輯；也可開啟「點選後直接送出」。
-- **語言跟隨對話**：prompt 中明確指示模型使用與對話相同的語言撰寫選項。
-- **生成來源可選**：
-  - 「目前連線設定」——使用你目前選用的 API 連線。
-  - 任一已儲存的 **Connection Profile**——可用便宜快速的模型專門生成選項，不佔用主要模型。
-  - （舊版 SillyTavern 若不支援 Connection Profile 請求，會自動只提供「目前連線設定」。）
-- **可自訂 Prompt 模板**：支援 `{{history}}`、`{{user}}`、`{{char}}`、`{{numChoices}}`、`{{persona}}` 巨集，也支援其他 SillyTavern 內建巨集，附「還原預設模板」按鈕。詳見〈[Prompt 模板巨集](#prompt-模板巨集)〉。
-- **貼合玩家人設**：預設模板會帶入你的玩家角色描述（`{{persona}}`），讓生成的選項符合你角色的語氣、文風與內心敘述。
-- **穩健解析**：優先解析 JSON 陣列輸出，失敗時自動 fallback 解析編號清單；再失敗會顯示錯誤與「重試」按鈕。
-- 支援 swipe／編輯／刪除訊息／切換聊天時自動清空過期選項，並中止進行中的請求。
-- 樣式使用 SillyTavern 主題變數，深淺色主題與行動裝置皆可正常顯示。
+- **自動生成**：每次 AI 回覆後自動產生選項；也可從魔杖選單（SillyTavern）、輸入框 Extras 選單或指令面板（Lumiverse），或輸入框旁可選的 🎲 按鈕手動生成。
+- **點選填入或送出**：預設將選項填入輸入框供編輯；開啟「點選後直接送出」則立即送出。
+- **編輯**：使用前可直接修改任一選項。
+- **增強**：依你輸入的指示（例如「安慰她」）改寫所有選項，保留各選項的主要內容。
+- **合併**：將兩個以上勾選的選項合併為一個連貫的回覆，未勾選的選項保持不變。
+- **引導式生成**：圍繞單一主題（例如「邀她跳舞」）生成一組新選項。
+- **停止**：可取消進行中的生成、增強或合併請求，現有選項與草稿都會保留。
+- **生成來源可選**：使用目前連線，或任一已儲存的連線設定檔，用便宜快速的模型專門生成選項，不佔用主要模型。
+- **貼合玩家人設**：預設模板帶入你的玩家角色描述，讓選項符合角色語氣；模板可自由編輯。
+- **穩健解析**：優先解析 JSON 陣列，失敗時改解析編號或項目清單；仍失敗則顯示錯誤與「重試」按鈕。
+- swipe、編輯、刪除訊息或切換聊天時，會清空過期選項並中止進行中的請求。
 
 ## 安裝方式
 
-1. 開啟 SillyTavern，點選上方的 **Extensions**（延伸功能）面板。
-2. 點 **Install extension**（安裝擴充功能）。
-3. 貼上本 repo 的 git URL：
+### SillyTavern
+
+1. 開啟 **Extensions** → **Install extension**。
+2. 貼上本 repo 的網址：
 
    ```
-   https://github.com/pdatone/next-choices
+   https://github.com/kikyoicecream/next-choices
    ```
 
-4. 安裝完成後重新整理頁面，即可在 Extensions 設定面板中看到「Next Choices」。
+3. 重新整理頁面，即可在 Extensions 設定面板看到「Next Choices」。
+
+### Lumiverse
+
+1. 開啟 **Extensions** → 從原始碼安裝，貼上同一個 repo 網址。
+2. 授予所需權限：
+   - `generation`：生成選項。
+   - `chats` 與 `chat_mutation`：讀取最近的訊息。
+   - `personas`：帶入 `{{persona}}`。
+3. 啟用擴充功能。設定位於 **Settings → Extensions → Next Choices**。
 
 ## 設定說明
-
-在 Extensions 面板中展開「Next Choices」：
 
 | 設定 | 預設值 | 說明 |
 | --- | --- | --- |
 | 啟用擴充功能 | 開 | 總開關。 |
-| 自動生成 | 開 | AI 回覆後自動產生選項；關閉後輸入框上方會出現「🎲 生成選項」按鈕改為手動觸發。 |
-| 點選後直接送出 | 關 | 開啟後點選項會立即送出；預設僅填入輸入框供編輯。 |
-| 生成來源 | 目前連線設定 | 選擇用目前的 API 連線，或任一已儲存的 Connection Profile 來生成選項。 |
+| 自動生成 | 開 | AI 回覆後自動產生選項；手動觸發隨時可用。 |
+| 點選後直接送出 | 關 | 點選選項後立即送出，而不是填入輸入框。 |
+| 在訊息輸入框旁顯示生成選項按鈕 | 關 | 在輸入框旁加入 🎲（生成）與引導式生成按鈕。 |
+| 生成來源 | 目前連線設定 | 使用目前連線，或任一已儲存的連線設定檔。 |
 | 選項數量 | 3 | 每次生成幾個選項。 |
 | 最大 Token 數 | 500 | 生成請求的 token 上限。 |
-| 參考歷史則數 | 4 | 帶入最近 N 則對話作為生成參考。 |
-| Prompt 模板 | 內建英文模板 | 可自由編輯；詳見下方〈[Prompt 模板巨集](#prompt-模板巨集)〉，並附「還原預設模板」按鈕。 |
+| 參考歷史則數 | 4 | 帶入最近幾則對話作為參考。 |
+| Prompt 模板 | 內建模板 | 可自由編輯，巨集見下表；「還原預設模板」可重設。 |
 
-## Prompt 模板巨集
-
-組建 prompt 時會替換以下巨集：
+### Prompt 模板巨集
 
 | 巨集 | 替換為 |
 | --- | --- |
@@ -224,18 +162,15 @@ SillyTavern 第三方 UI 擴充功能：在每次 AI 角色回覆完成後，依
 | `{{numChoices}}` | 「選項數量」設定值。 |
 | `{{user}}` | 你（玩家）的名字。 |
 | `{{char}}` | AI 角色的名字。 |
-| `{{persona}}` | Persona Management 中的玩家角色描述，讓選項貼合你角色的語氣、文風與內心敘述。未設定人設時為空字串。 |
+| `{{persona}}` | 你的玩家角色描述；未設定時為空字串。 |
 
-其他 **SillyTavern 內建巨集**（例如 `{{description}}`、`{{scenario}}`）在目前版本支援時也會透過 SillyTavern 自身的巨集引擎展開。`{{history}}` 一律在巨集展開後才插入，因此聊天訊息中出現的巨集字樣不會被誤展開。
+在 SillyTavern 中，其他內建巨集（例如 `{{description}}`、`{{scenario}}`）也會展開。`{{history}}` 一律在巨集展開後才插入，因此聊天訊息中類似巨集的文字不會被誤展開。
 
-> 注意：舊版內建模板會自動升級並加入 `{{persona}}`。已自訂的模板會原樣保留；請自行加入 `{{persona}}`，或按「還原預設模板」以帶入人設資訊。
+舊版內建模板會自動升級並加入 `{{persona}}`；自訂模板一律原樣保留，請自行加入 `{{persona}}`，或按「還原預設模板」。
 
-## 使用方式
+## 開發
 
-1. 與角色正常對話。
-2. AI 回覆完成後，輸入框上方會出現選項按鈕列（生成中會顯示轉圈動畫）。
-3. 點選任一選項，文字會填入輸入框，編輯後送出即可。
-4. 按鈕列右側的 ♻️ 可重新生成，✖ 可收合選項列。
+請見 [CONTRIBUTING.md](CONTRIBUTING.md)。簡單來說：修改 `src/` 後執行 `bun run build`。產生的 `index.js` 與 `dist/` 會一併提交，讓兩種宿主程式都能直接從 GitHub 安裝。
 
 ## 授權
 

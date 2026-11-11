@@ -31,8 +31,6 @@ function counterIds() {
     return () => `id${++n}`;
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 describe('request / reply correlation', () => {
     test('getContext resolves with the reply that carries its requestId, ignoring others', async () => {
         const host = fakeTransport();
