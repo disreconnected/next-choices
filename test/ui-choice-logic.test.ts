@@ -5,7 +5,15 @@ describe('mergeCombined', () => {
     const originals = ['a', 'b', 'c', 'd'];
 
     test('the rewrite replaces the earliest selected choice and the other selected ones go', () => {
-        expect(mergeCombined(originals, [1, 3], 'X')).toEqual({ choices: ['a', 'X', 'c'], insertionIndex: 1 });
+        expect(mergeCombined(originals, [1, 3], 'X')).toEqual({ choices: ['a', 'X', 'c'], insertionIndex: 1, combinedIndexes: [1] });
+    });
+
+    test('earlier combined choices keep their mark at their new position', () => {
+        expect(mergeCombined(originals, [0, 1], 'X', [3]).combinedIndexes).toEqual([0, 2]);
+    });
+
+    test('a combined choice that is merged again is marked once', () => {
+        expect(mergeCombined(originals, [1, 2], 'X', [1, 2]).combinedIndexes).toEqual([1]);
     });
 
     test('selection order does not matter', () => {
@@ -21,11 +29,12 @@ describe('mergeCombined', () => {
         expect(mergeCombined(originals, [-1, 9, 1.5, 2, 2], 'X')).toEqual({
             choices: ['a', 'b', 'X', 'd'],
             insertionIndex: 2,
+            combinedIndexes: [2],
         });
     });
 
     test('with nothing valid selected the rewrite takes the first slot', () => {
-        expect(mergeCombined(originals, [], 'X')).toEqual({ choices: ['X', 'b', 'c', 'd'], insertionIndex: 0 });
+        expect(mergeCombined(originals, [], 'X')).toEqual({ choices: ['X', 'b', 'c', 'd'], insertionIndex: 0, combinedIndexes: [0] });
     });
 
     test('accepts any iterable', () => {

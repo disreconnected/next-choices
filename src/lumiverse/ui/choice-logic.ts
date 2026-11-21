@@ -2,18 +2,25 @@ export function mergeCombined(
     originals: readonly string[],
     selectedIndexes: Iterable<number>,
     rewritten: string,
-): { choices: string[]; insertionIndex: number } {
+    combinedIndexes: readonly number[] = [],
+): { choices: string[]; insertionIndex: number; combinedIndexes: number[] } {
     const selected = new Set(
         [...selectedIndexes].filter((index) => Number.isInteger(index) && index >= 0 && index < originals.length),
     );
     const sorted = [...selected].sort((a, b) => a - b);
     const insertionIndex = sorted[0] ?? 0;
     const choices: string[] = [];
+    const nextCombined: number[] = [];
     originals.forEach((choice, index) => {
-        if (index === insertionIndex) choices.push(rewritten);
-        else if (!selected.has(index)) choices.push(choice);
+        if (index === insertionIndex) {
+            nextCombined.push(choices.length);
+            choices.push(rewritten);
+        } else if (!selected.has(index)) {
+            if (combinedIndexes.includes(index)) nextCombined.push(choices.length);
+            choices.push(choice);
+        }
     });
-    return { choices, insertionIndex };
+    return { choices, insertionIndex, combinedIndexes: nextCombined };
 }
 
 export function selectedInOrder(selected: Iterable<number>, count: number): number[] {

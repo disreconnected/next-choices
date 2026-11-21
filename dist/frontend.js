@@ -270,6 +270,7 @@ var zh_tw_default = {
   Combine: "合併",
   "Combine choices": "合併選項",
   "Combine selected": "合併所選選項",
+  "New!": "新！",
   Cancel: "取消",
   "Select at least two choices to combine.": "請至少選擇兩個要合併的選項。",
   "Select choice {number} to combine": "選擇要合併的第 {number} 個選項",
@@ -1120,6 +1121,17 @@ var STYLES = `
     min-width: 0;
 }
 
+.next-choices-new-badge {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background-color: var(--lumiverse-primary, #9370db);
+    color: var(--lumiverse-bg, #111);
+    font-size: 0.75em;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
 .next-choices-edit {
     box-sizing: border-box;
     display: inline-flex;
@@ -1350,18 +1362,23 @@ function formatChoiceHtml(text) {
 }
 
 // src/lumiverse/ui/choice-logic.ts
-function mergeCombined(originals, selectedIndexes, rewritten) {
+function mergeCombined(originals, selectedIndexes, rewritten, combinedIndexes = []) {
   const selected = new Set([...selectedIndexes].filter((index) => Number.isInteger(index) && index >= 0 && index < originals.length));
   const sorted = [...selected].sort((a, b) => a - b);
   const insertionIndex = sorted[0] ?? 0;
   const choices = [];
+  const nextCombined = [];
   originals.forEach((choice, index) => {
-    if (index === insertionIndex)
+    if (index === insertionIndex) {
+      nextCombined.push(choices.length);
       choices.push(rewritten);
-    else if (!selected.has(index))
+    } else if (!selected.has(index)) {
+      if (combinedIndexes.includes(index))
+        nextCombined.push(choices.length);
       choices.push(choice);
+    }
   });
-  return { choices, insertionIndex };
+  return { choices, insertionIndex, combinedIndexes: nextCombined };
 }
 function selectedInOrder(selected, count) {
   return [...new Set(selected)].filter((index) => Number.isInteger(index) && index >= 0 && index < count).sort((a, b) => a - b);
@@ -1482,7 +1499,7 @@ function createChoicesUi(deps) {
     });
     container.append(notice, makeToolbar({ regenerate: false, generationGuidance: "" }).toolbar);
   }
-  function renderChoices(choices, generationGuidance = "") {
+  function renderChoices(choices, generationGuidance = "", combinedIndexes = []) {
     const container = deps.getContainer();
     if (!container)
       return;
@@ -1582,7 +1599,11 @@ function createChoicesUi(deps) {
         setEditing(false);
         edit.focus();
       });
-      row.append(select, item, edit, editor);
+      row.append(select);
+      if (combinedIndexes.includes(index)) {
+        row.append(h("span", { className: "next-choices-new-badge", text: tr("New!") }));
+      }
+      row.append(item, edit, editor);
       list.append(row);
       rowRefs.push({ row, item, edit, select, checkbox });
     });
@@ -1886,8 +1907,8 @@ function createChoicesUi(deps) {
         combineSubmit.focus();
         return;
       }
-      const merged = mergeCombined(originals, selectedIndexes, rewritten[0]);
-      renderChoices(merged.choices, generationGuidance);
+      const merged = mergeCombined(originals, selectedIndexes, rewritten[0], combinedIndexes);
+      renderChoices(merged.choices, generationGuidance, merged.combinedIndexes);
       view.querySelectorAll(".next-choices-item")[merged.insertionIndex]?.focus();
     }
     combineSubmit.addEventListener("click", () => void combineDisplayedChoices());

@@ -384,6 +384,17 @@ export const STYLES = `
     min-width: 0;
 }
 
+.next-choices-new-badge {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background-color: var(--lumiverse-primary, #9370db);
+    color: var(--lumiverse-bg, #111);
+    font-size: 0.75em;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
 .next-choices-edit {
     box-sizing: border-box;
     display: inline-flex;
