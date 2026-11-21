@@ -500,7 +500,7 @@
         return null;
       }
     }
-    function renderChoices(choices, generationGuidance = "") {
+    function renderChoices(choices, generationGuidance = "", combinedIndexes = []) {
       const $container = getContainer();
       if (!$container.length)
         return;
@@ -597,7 +597,11 @@
         const $actions = $('<div class="next-choices-edit-actions"></div>');
         $actions.append($apply, $reset);
         $editor.append($input, $actions);
-        $row.append($select, $btn, $edit, $editor);
+        $row.append($select);
+        if (combinedIndexes.includes(index)) {
+          $row.append($('<span class="next-choices-new-badge"></span>').text(tr("New!")));
+        }
+        $row.append($btn, $edit, $editor);
         $list.append($row);
         rowRefs.push({ $row, $btn, $edit, $select, $checkbox });
       });
@@ -888,13 +892,18 @@
         const insertionIndex = selectedIndexes[0];
         const selected = new Set(selectedIndexes);
         const nextChoices = [];
+        const nextCombined = [];
         originals.forEach((choice, index) => {
-          if (index === insertionIndex)
+          if (index === insertionIndex) {
+            nextCombined.push(nextChoices.length);
             nextChoices.push(rewritten[0]);
-          else if (!selected.has(index))
+          } else if (!selected.has(index)) {
+            if (combinedIndexes.includes(index))
+              nextCombined.push(nextChoices.length);
             nextChoices.push(choice);
+          }
         });
-        renderChoices(nextChoices, generationGuidance);
+        renderChoices(nextChoices, generationGuidance, nextCombined);
         $(`#${CONTAINER_ID} .next-choices-item`).eq(insertionIndex).trigger("focus");
       };
       $combineSubmit.on("click", () => combineDisplayedChoices());

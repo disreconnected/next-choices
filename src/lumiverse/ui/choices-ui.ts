@@ -27,7 +27,7 @@ export interface ChoicesUi {
     renderLoading(handle: RequestHandle, focusTarget: Element | null): void;
     renderError(message: string, generationGuidance?: string): void;
     renderNotice(message: string): void;
-    renderChoices(choices: readonly string[], generationGuidance?: string): void;
+    renderChoices(choices: readonly string[], generationGuidance?: string, combinedIndexes?: readonly number[]): void;
 }
 
 interface ToolbarOptions {
@@ -162,7 +162,7 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
         container.append(notice, makeToolbar({ regenerate: false, generationGuidance: '' }).toolbar);
     }
 
-    function renderChoices(choices: readonly string[], generationGuidance = ''): void {
+    function renderChoices(choices: readonly string[], generationGuidance = '', combinedIndexes: readonly number[] = []): void {
         const container = deps.getContainer();
         if (!container) return;
         const view: HTMLElement = container;
@@ -269,7 +269,11 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
                 edit.focus();
             });
 
-            row.append(select, item, edit, editor);
+            row.append(select);
+            if (combinedIndexes.includes(index)) {
+                row.append(h('span', { className: 'next-choices-new-badge', text: tr('New!') }));
+            }
+            row.append(item, edit, editor);
             list.append(row);
             rowRefs.push({ row, item, edit, select, checkbox });
         });
@@ -571,8 +575,8 @@ export function createChoicesUi(deps: ChoicesUiDeps): ChoicesUi {
                 return;
             }
 
-            const merged = mergeCombined(originals, selectedIndexes, rewritten[0]!);
-            renderChoices(merged.choices, generationGuidance);
+            const merged = mergeCombined(originals, selectedIndexes, rewritten[0]!, combinedIndexes);
+            renderChoices(merged.choices, generationGuidance, merged.combinedIndexes);
             view.querySelectorAll<HTMLElement>('.next-choices-item')[merged.insertionIndex]?.focus();
         }
         combineSubmit.addEventListener('click', () => void combineDisplayedChoices());
